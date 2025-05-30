@@ -25,7 +25,7 @@ impl Loader {
                 PlayerConfig::default(),
                 session.clone(),
                 Box::new(NoOpVolume),
-                move || backend(Some("audio.bin".into()), AudioFormat::S16),
+                move || backend(Some("temp.pcm".into()), AudioFormat::S16),
             ),
             session,
         }
@@ -82,7 +82,7 @@ impl Loader {
             .arg("-ac")
             .arg("2")
             .arg("-i")
-            .arg("audio.bin")
+            .arg("temp.pcm")
             .arg(output_file_name)
             .spawn()
             .expect("Failed to spawn ffmpeg, is it installed?");
@@ -92,8 +92,8 @@ impl Loader {
             std::process::exit(1);
         });
 
-        std::fs::remove_file("audio.bin").unwrap_or_else(|e| {
-            log::error!("Failed to remove audio.bin: {}", e);
+        std::fs::remove_file("temp.pcm").unwrap_or_else(|e| {
+            log::error!("Failed to remove temp.pcm: {}", e);
         });
     }
 }
