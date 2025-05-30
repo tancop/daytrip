@@ -47,5 +47,7 @@ countries (looking at you America). **You are the only one responsible for any l
 ## Roadmap
 
 - [ ] Add option to remove feature tags
-- [ ] Add option to remove everything inside ( ) for cases like https://open.spotify.com/album/1bwbZJ6khPJyVpOaqgKsoZ
-- [ ] Add more audio formats (mp3, wav, ogg vorbis)
+- [ ] Add option to remove everything inside `( )` for cases like https://open.spotify.com/album/1bwbZJ6khPJyVpOaqgKsoZ
+- [ ] More audio formats (mp3, wav, ogg vorbis)
+- [ ] Downloading album art
+- [ ] Change download folder
