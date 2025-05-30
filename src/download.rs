@@ -138,7 +138,7 @@ impl Loader {
             SpotifyItemType::Playlist => self.download_playlist(item_ref).await,
             SpotifyItemType::Episode => self.download_track(item_ref).await,
             _ => {
-                log::error!("Unsupported item type");
+                log::error!("Unsupported item type: {:?}", item_ref.item_type);
                 std::process::exit(1);
             }
         }
