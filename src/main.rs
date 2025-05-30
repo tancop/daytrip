@@ -1,16 +1,6 @@
 use download::Loader;
-use librespot::{
-    core::{
-        Session, SessionConfig, SpotifyId, authentication::Credentials, cache::Cache,
-        spotify_id::SpotifyItemType,
-    },
-    metadata::audio::{AudioItem, UniqueFields},
-    playback::{
-        audio_backend,
-        config::{AudioFormat, PlayerConfig},
-        mixer::NoOpVolume,
-        player::Player,
-    },
+use librespot::core::{
+    Session, SessionConfig, SpotifyId, cache::Cache, spotify_id::SpotifyItemType,
 };
 use regex::Regex;
 

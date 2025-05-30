@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use librespot::{
     core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
