@@ -32,17 +32,27 @@ async fn main() {
     };
 
     let item_ref = if (&args[1]).starts_with("spotify:") {
-        SpotifyId::from_uri(&args[1]).unwrap()
+        let Ok(item_ref) = SpotifyId::from_base62(&args[1]) else {
+            log::error!("Invalid Spotify ID: {}", &args[1]);
+            std::process::exit(1);
+        };
+        item_ref
     } else {
         let re = Regex::new(r"spotify\.com/(\w+)/(\w+)").unwrap();
         if let Some(res) = re.captures(&args[1]) {
             let item_type = &res[1];
             let id = &res[2];
-            let mut item_ref = SpotifyId::from_base62(id).unwrap();
+            let Ok(mut item_ref) = SpotifyId::from_base62(id) else {
+                log::error!("Invalid Spotify ID: {}", id);
+                std::process::exit(1);
+            };
             item_ref.item_type = parse_item_type(item_type);
             item_ref
         } else {
-            let mut item_ref = SpotifyId::from_base62(&args[1]).unwrap();
+            let Ok(mut item_ref) = SpotifyId::from_base62(&args[1]) else {
+                log::error!("Invalid Spotify ID: {}", &args[1]);
+                std::process::exit(1);
+            };
             item_ref.item_type = SpotifyItemType::Track;
             item_ref
         }
