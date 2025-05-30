@@ -1,7 +1,7 @@
 use librespot::{
     core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
-        Album, Metadata, Playlist,
+        Album, Metadata, Playlist, Show,
         audio::{AudioItem, UniqueFields},
     },
     playback::{
@@ -137,12 +137,22 @@ impl Loader {
         }
     }
 
+    pub async fn download_show(&self, playlist_ref: SpotifyId) {
+        let show = Show::get(&self.session, &playlist_ref).await.unwrap();
+        println!("Downloading show {} by {}", show.name, show.publisher);
+        for episode_id in show.episodes.iter() {
+            self.download_track(episode_id.clone()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
     pub async fn download(&self, item_ref: SpotifyId) {
         match item_ref.item_type {
             SpotifyItemType::Track => self.download_track(item_ref).await,
             SpotifyItemType::Album => self.download_album(item_ref).await,
             SpotifyItemType::Playlist => self.download_playlist(item_ref).await,
             SpotifyItemType::Episode => self.download_track(item_ref).await,
+            SpotifyItemType::Show => self.download_show(item_ref).await,
             _ => {
                 log::error!("Unsupported item type: {:?}", item_ref.item_type);
                 std::process::exit(1);
