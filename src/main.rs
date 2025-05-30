@@ -1,6 +1,6 @@
 use download::Loader;
 use librespot::core::{
-    Session, SessionConfig, SpotifyId, cache::Cache, spotify_id::SpotifyItemType,
+    Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind, spotify_id::SpotifyItemType,
 };
 use regex::Regex;
 
@@ -84,13 +84,28 @@ async fn main() {
 
     let session = Session::new(SessionConfig::default(), Some(cache));
 
-    session
-        .connect(credentials, true)
-        .await
-        .unwrap_or_else(|e| {
-            log::error!("Failed to connect to Spotify: {e}");
-            std::process::exit(1);
-        });
+    match session.connect(credentials, true).await {
+        Ok(_) => {}
+        Err(e) => {
+            if e.kind == ErrorKind::PermissionDenied {
+                // Credentials might be invalid, get new ones and try again
+                let credentials = match auth::get_credentials() {
+                    Ok(credentials) => credentials,
+                    Err(e) => {
+                        log::error!("Error getting credentials from Spotify: {e}");
+                        std::process::exit(1);
+                    }
+                };
+                if let Err(e) = session.connect(credentials, true).await {
+                    log::error!("Failed to connect to Spotify: {e}");
+                    std::process::exit(1);
+                }
+            } else {
+                log::error!("Failed to connect to Spotify: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     let loader = Loader::new(session);
 
