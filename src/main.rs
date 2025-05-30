@@ -27,9 +27,9 @@ async fn main() {
     let args: Vec<_> = std::env::args().collect();
 
     let cache = Cache::new(
-        Some("./cache"),
-        Some("./cache"),
-        Some("./cache/audio"),
+        Some("./daytrip-cache"),
+        Some("./daytrip-cache"),
+        Some("./daytrip-cache/audio"),
         // Cache is useful for streaming but we're downloading anyway
         Some(0),
     )
