@@ -1,0 +1,17 @@
+[package]
+name = "daytrip"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+env_logger = "0.11.8"
+futures-util = "0.3.31"
+librespot = "0.6.0-dev"
+librespot-oauth = "0.6.0-dev"
+log = "0.4.27"
+symphonia-core = "0.5.4"
+tokio = { version = "1.45.1", features = ["full"] }
+
+[patch.crates-io]
+librespot = { git = 'https://github.com/tancop/librespot.git' }
+librespot-oauth = { git = 'https://github.com/tancop/librespot.git' }
