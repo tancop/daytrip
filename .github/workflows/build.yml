@@ -1,0 +1,60 @@
+name: Build package
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Prepare artifacts
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --release
+
+          mkdir release
+
+          cp target/release/daytrip.exe release/
+
+      - name: Prepare artifacts
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release
+
+          mkdir release
+
+          cp target/release/daytrip release/
+
+      - name: Upload release zip
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: "release-windows"
+          path: "release"
+
+      - name: Upload release zip
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: "release-linux"
+          path: "release"
