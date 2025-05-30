@@ -41,7 +41,7 @@ async fn main() {
         std::process::exit(1);
     };
 
-    let track_ref = if (&args[1]).starts_with("spotify:") {
+    let item_ref = if (&args[1]).starts_with("spotify:") {
         SpotifyId::from_uri(&args[1]).unwrap()
     } else {
         let re = Regex::new(r"spotify\.com/(\w+)/(\w+)").unwrap();
@@ -81,7 +81,7 @@ async fn main() {
 
     let loader = Loader::new(session);
 
-    loader.download_track(track_ref).await;
+    loader.download(item_ref).await;
 
     println!("All set!");
 }

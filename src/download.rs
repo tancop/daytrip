@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use librespot::{
-    core::{Session, SpotifyId},
+    core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::audio::{AudioItem, UniqueFields},
     playback::{
         audio_backend,
@@ -11,13 +11,13 @@ use librespot::{
     },
 };
 
-pub(crate) struct Loader {
+pub struct Loader {
     player: Arc<Player>,
     session: Session,
 }
 
 impl Loader {
-    pub(crate) fn new(session: Session) -> Self {
+    pub fn new(session: Session) -> Self {
         let backend = audio_backend::find(Some("pipe".to_owned())).unwrap();
 
         Self {
@@ -31,7 +31,7 @@ impl Loader {
         }
     }
 
-    pub(crate) async fn download_track(&self, track_ref: SpotifyId) {
+    pub async fn download_track(&self, track_ref: SpotifyId) {
         let output_file_name: String;
 
         if let Ok(audio_item) = AudioItem::get_file(&self.session, track_ref).await {
@@ -95,5 +95,18 @@ impl Loader {
         std::fs::remove_file("temp.pcm").unwrap_or_else(|e| {
             log::error!("Failed to remove temp.pcm: {}", e);
         });
+    }
+
+    pub async fn download(&self, item_ref: SpotifyId) {
+        match item_ref.item_type {
+            SpotifyItemType::Track => self.download_track(item_ref).await,
+            //SpotifyItemType::Album => self.download_album(item_ref).await,
+            //SpotifyItemType::Playlist => self.download_playlist(item_ref).await,
+            SpotifyItemType::Episode => self.download_track(item_ref).await,
+            _ => {
+                log::error!("Unsupported item type");
+                std::process::exit(1);
+            }
+        }
     }
 }
