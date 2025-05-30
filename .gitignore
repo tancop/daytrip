@@ -1,7 +1,7 @@
 /target
 
 # Raw PCM files
-*.bin
+*.pcm
 
 # Audio files
 *.opus
