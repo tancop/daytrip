@@ -13,7 +13,7 @@ use librespot::{
         player::Player,
     },
 };
-use tokio::fs::{File, create_dir};
+use tokio::fs::{File, create_dir_all};
 
 /// Replace characters illegal in a path on Windows or Linux
 fn legalize_name(name: String) -> String {
@@ -124,7 +124,7 @@ impl Loader {
         let name = plist.name();
         let folder = Path::new(&name);
 
-        if let Err(e) = create_dir(folder).await {
+        if let Err(e) = create_dir_all(folder).await {
             log::error!("Failed to create playlist folder: {}", e);
             return;
         };
@@ -147,7 +147,7 @@ impl Loader {
         let folder_name = format!("{} - {}", artists, album.name);
         let folder = Path::new(&folder_name);
 
-        if let Err(e) = create_dir(folder).await {
+        if let Err(e) = create_dir_all(folder).await {
             log::error!("Failed to create album folder: {}", e);
             return;
         };
@@ -165,7 +165,7 @@ impl Loader {
 
         let folder = Path::new(&show.name);
 
-        if let Err(e) = create_dir(folder).await {
+        if let Err(e) = create_dir_all(folder).await {
             log::error!("Failed to create show folder: {}", e);
             return;
         };
