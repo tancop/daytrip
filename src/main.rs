@@ -26,9 +26,32 @@ async fn main() {
     env_logger::init();
     let args: Vec<_> = std::env::args().collect();
 
-    let Ok(credentials) = auth::get_credentials() else {
-        log::error!("Error getting credentials from Spotify");
+    let cache = Cache::new(
+        Some("./cache"),
+        Some("./cache"),
+        Some("./cache/audio"),
+        Some(16000000),
+    )
+    .unwrap_or_else(|e| {
+        log::error!("Failed to open cache: {e}");
         std::process::exit(1);
+    });
+
+    let credentials = match cache.credentials() {
+        Some(credentials) => {
+            log::info!("Using cached credentials");
+            credentials
+        }
+        None => {
+            let credentials = match auth::get_credentials() {
+                Ok(credentials) => credentials,
+                Err(e) => {
+                    log::error!("Error getting credentials from Spotify: {e}");
+                    std::process::exit(1);
+                }
+            };
+            credentials
+        }
     };
 
     let item_ref = if (&args[1]).starts_with("spotify:") {
@@ -57,17 +80,6 @@ async fn main() {
             item_ref
         }
     };
-
-    let cache = Cache::new(
-        Some("./cache"),
-        Some("./cache"),
-        Some("./cache/audio"),
-        Some(16000000),
-    )
-    .unwrap_or_else(|e| {
-        log::error!("Failed to create cache: {e}");
-        std::process::exit(1);
-    });
 
     let session = Session::new(SessionConfig::default(), Some(cache));
 
