@@ -83,5 +83,7 @@ async fn main() {
 
     loader.download(item_ref).await;
 
+    let _ = tokio::fs::remove_file("temp.pcm").await;
+
     println!("All set!");
 }
