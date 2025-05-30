@@ -60,6 +60,7 @@ impl Loader {
                 }
             };
         } else {
+            log::warn!("Failed to get audio item name, falling back to ID");
             output_file_name = format!("{}.opus", track_ref.to_base62().unwrap());
         }
 
