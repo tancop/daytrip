@@ -30,7 +30,8 @@ async fn main() {
         Some("./cache"),
         Some("./cache"),
         Some("./cache/audio"),
-        Some(16000000),
+        // Cache is useful for streaming but we're downloading anyway
+        Some(0),
     )
     .unwrap_or_else(|e| {
         log::error!("Failed to open cache: {e}");
