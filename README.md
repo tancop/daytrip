@@ -10,17 +10,18 @@ or proprietary formats. Your music is _yours_ again. Works for both free and pre
 
 ## Installing
 
-You need [ffmpeg](https://ffmpeg.org/) installed to use this. If you already have it, download the
+You need [ffmpeg](https://ffmpeg.org/) installed to use this. You should probably download it with a package manager
+like dnf, apt, pacman or winget. If you already have it, download the
 [latest release zip](https://github.com/tancop/daytrip/releases/latest) for your system and unpack it where you want.
 
 ## Usage
 
 You can download songs, albums, playlists, podcast episodes or shows using their share link.
-Open the Spotify app or the web player, right click on the thing you want to download and select
-`Share > Copy link to [...]`. Then open a terminal and paste the link like this:
+Open the Spotify app or web player, right click on the thing you want to download and select
+`Share > Copy link to [...]`. Then open a terminal in the folder with Daytrip and paste the link like this:
 
 ```
-daytrip "https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr?si=aff53d31ec5b405c"
+./daytrip "https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr?si=aff53d31ec5b405c"
 ```
 
 You might not need quotes around the link on some systems. If this is your first time downloading or the cached
