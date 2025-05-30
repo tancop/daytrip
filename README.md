@@ -42,4 +42,10 @@ with the show title instead of artist names.
 
 Downloading music like this goes against Spotify's TOS and might get you banned. If you don't need full premium
 quality you should probably use a free burner account. Bypassing copy protection might be illegal in some
-countries (looking at you America). You are the only one responsible for any legal issues caused by using Daytrip.
+countries (looking at you America). **You are the only one responsible for any legal issues caused by using Daytrip**.
+
+## Roadmap
+
+- [ ] Add option to remove feature tags
+- [ ] Add option to remove everything inside ( ) for cases like https://open.spotify.com/album/1bwbZJ6khPJyVpOaqgKsoZ
+- [ ] Add more audio formats (mp3, wav, ogg vorbis)
