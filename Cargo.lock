@@ -570,7 +570,6 @@ dependencies = [
  "librespot-oauth",
  "log",
  "regex",
- "symphonia-core",
  "tokio",
 ]
 

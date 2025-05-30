@@ -11,7 +11,6 @@ librespot = "0.6.0-dev"
 librespot-oauth = "0.6.0-dev"
 log = "0.4.27"
 regex = "1.11.1"
-symphonia-core = "0.5.4"
 tokio = { version = "1.45.1", features = ["full"] }
 
 [patch.crates-io]
