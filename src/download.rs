@@ -13,6 +13,11 @@ use librespot::{
 };
 use tokio::fs::File;
 
+/// Replace characters illegal in a path on Windows or Linux
+fn legalize_name(name: String) -> String {
+    name.replace(&['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+}
+
 pub struct Loader {
     session: Session,
 }
@@ -83,9 +88,9 @@ impl Loader {
             .arg("2")
             .arg("-i")
             .arg("temp.pcm")
-            .arg(output_file_name)
+            .arg(legalize_name(output_file_name))
             .spawn()
-            .expect("Failed to spawn ffmpeg, is it installed?");
+            .expect("Failed to spawn ffmpeg, is it installed and on PATH?");
 
         cmd.wait().await.unwrap_or_else(|e| {
             log::error!("Failed to wait for ffmpeg: {}", e);
