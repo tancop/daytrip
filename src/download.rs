@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use librespot::{
     core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
@@ -11,7 +13,7 @@ use librespot::{
         player::Player,
     },
 };
-use tokio::fs::File;
+use tokio::fs::{File, create_dir};
 
 /// Replace characters illegal in a path on Windows or Linux
 fn legalize_name(name: String) -> String {
@@ -27,7 +29,7 @@ impl Loader {
         Self { session }
     }
 
-    pub async fn download_track(&self, track_ref: SpotifyId) {
+    pub async fn download_track(&self, track_ref: SpotifyId, path_prefix: Option<&Path>) {
         let output_file_name: String;
 
         if let Ok(audio_item) = AudioItem::get_file(&self.session, track_ref).await {
@@ -64,6 +66,11 @@ impl Loader {
             output_file_name = format!("{}.opus", track_ref.to_base62().unwrap());
         }
 
+        let output_file_name = match path_prefix {
+            Some(prefix) => prefix.join(&legalize_name(output_file_name)),
+            None => legalize_name(output_file_name).into(),
+        };
+
         let backend = audio_backend::find(Some("pipe".to_owned())).unwrap();
 
         let player = Player::new(
@@ -89,7 +96,7 @@ impl Loader {
             .arg("2")
             .arg("-i")
             .arg("temp.pcm")
-            .arg(legalize_name(output_file_name))
+            .arg(output_file_name)
             .spawn()
             .expect("Failed to spawn ffmpeg, is it installed and on PATH?");
 
@@ -113,26 +120,41 @@ impl Loader {
     pub async fn download_playlist(&self, playlist_ref: SpotifyId) {
         let plist = Playlist::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading playlist {}", plist.name());
+
+        let name = plist.name();
+        let folder = Path::new(&name);
+
+        if let Err(e) = create_dir(folder).await {
+            log::error!("Failed to create playlist folder: {}", e);
+            return;
+        };
+
         for track_id in plist.tracks() {
-            self.download_track(track_id.clone()).await;
+            self.download_track(track_id.clone(), Some(folder)).await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
     pub async fn download_album(&self, playlist_ref: SpotifyId) {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
-        println!(
-            "Downloading album {} by {}",
-            album.name,
-            album
-                .artists
-                .iter()
-                .map(|artist| &*artist.name)
-                .collect::<Vec<&str>>()
-                .join(", ")
-        );
+        let artists = album
+            .artists
+            .iter()
+            .map(|artist| &*artist.name)
+            .collect::<Vec<&str>>()
+            .join(", ");
+
+        let folder_name = format!("{} - {}", artists, album.name);
+        let folder = Path::new(&folder_name);
+
+        if let Err(e) = create_dir(folder).await {
+            log::error!("Failed to create album folder: {}", e);
+            return;
+        };
+
+        println!("Downloading album {} by {}", album.name, artists);
         for track_id in album.tracks() {
-            self.download_track(track_id.clone()).await;
+            self.download_track(track_id.clone(), Some(folder)).await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
@@ -140,18 +162,26 @@ impl Loader {
     pub async fn download_show(&self, playlist_ref: SpotifyId) {
         let show = Show::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading show {} by {}", show.name, show.publisher);
+
+        let folder = Path::new(&show.name);
+
+        if let Err(e) = create_dir(folder).await {
+            log::error!("Failed to create show folder: {}", e);
+            return;
+        };
+
         for episode_id in show.episodes.iter() {
-            self.download_track(episode_id.clone()).await;
+            self.download_track(episode_id.clone(), Some(folder)).await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
     pub async fn download(&self, item_ref: SpotifyId) {
         match item_ref.item_type {
-            SpotifyItemType::Track => self.download_track(item_ref).await,
+            SpotifyItemType::Track => self.download_track(item_ref, None).await,
             SpotifyItemType::Album => self.download_album(item_ref).await,
             SpotifyItemType::Playlist => self.download_playlist(item_ref).await,
-            SpotifyItemType::Episode => self.download_track(item_ref).await,
+            SpotifyItemType::Episode => self.download_track(item_ref, None).await,
             SpotifyItemType::Show => self.download_show(item_ref).await,
             _ => {
                 log::error!("Unsupported item type: {:?}", item_ref.item_type);
