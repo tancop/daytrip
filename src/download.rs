@@ -4,11 +4,11 @@ use librespot::{
     core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
         Album, Metadata, Playlist, Show,
-        audio::{AudioItem, UniqueFields},
+        audio::{AudioFileFormat, AudioItem, UniqueFields},
     },
     playback::{
         audio_backend,
-        config::{AudioFormat, PlayerConfig},
+        config::{AudioFormat, Bitrate, PlayerConfig},
         mixer::NoOpVolume,
         player::Player,
     },
@@ -31,6 +31,78 @@ fn get_format_extension(format: &OutputFormat) -> &str {
     }
 }
 
+fn get_input_format(config: &PlayerConfig, audio_item: &AudioItem) -> Option<AudioFileFormat> {
+    let formats = match config.bitrate {
+        Bitrate::Bitrate96 => [
+            AudioFileFormat::OGG_VORBIS_96,
+            AudioFileFormat::MP3_96,
+            AudioFileFormat::OGG_VORBIS_160,
+            AudioFileFormat::MP3_160,
+            AudioFileFormat::MP3_256,
+            AudioFileFormat::OGG_VORBIS_320,
+            AudioFileFormat::MP3_320,
+        ],
+        Bitrate::Bitrate160 => [
+            AudioFileFormat::OGG_VORBIS_160,
+            AudioFileFormat::MP3_160,
+            AudioFileFormat::OGG_VORBIS_96,
+            AudioFileFormat::MP3_96,
+            AudioFileFormat::MP3_256,
+            AudioFileFormat::OGG_VORBIS_320,
+            AudioFileFormat::MP3_320,
+        ],
+        Bitrate::Bitrate320 => [
+            AudioFileFormat::OGG_VORBIS_320,
+            AudioFileFormat::MP3_320,
+            AudioFileFormat::MP3_256,
+            AudioFileFormat::OGG_VORBIS_160,
+            AudioFileFormat::MP3_160,
+            AudioFileFormat::OGG_VORBIS_96,
+            AudioFileFormat::MP3_96,
+        ],
+    };
+
+    match formats
+        .iter()
+        .find_map(|format| match audio_item.files.get(format) {
+            Some(&file_id) => Some((*format, file_id)),
+            _ => None,
+        }) {
+        Some(t) => Some(t.0),
+        None => {
+            log::warn!(
+                "<{}> is not available in any supported format",
+                audio_item.name
+            );
+            None
+        }
+    }
+}
+
+fn get_bitrate(format: &AudioFileFormat) -> u32 {
+    match format {
+        AudioFileFormat::OGG_VORBIS_96 => 96,
+        AudioFileFormat::OGG_VORBIS_160 => 160,
+        AudioFileFormat::OGG_VORBIS_320 => 320,
+        AudioFileFormat::MP3_256 => 256,
+        AudioFileFormat::MP3_320 => 320,
+        AudioFileFormat::MP3_160 => 160,
+        AudioFileFormat::MP3_96 => 96,
+        AudioFileFormat::MP3_160_ENC => 160,
+        AudioFileFormat::AAC_24 => 24,
+        AudioFileFormat::AAC_48 => 48,
+        AudioFileFormat::FLAC_FLAC => 1411,
+        AudioFileFormat::XHE_AAC_24 => 24,
+        AudioFileFormat::XHE_AAC_16 => 16,
+        AudioFileFormat::XHE_AAC_12 => 12,
+        AudioFileFormat::FLAC_FLAC_24BIT => 1411,
+        AudioFileFormat::AAC_160 => 160,
+        AudioFileFormat::AAC_320 => 320,
+        AudioFileFormat::MP4_128 => 128,
+        AudioFileFormat::OTHER5 => 0,
+    }
+}
+
 pub struct Loader {
     session: Session,
 }
@@ -50,7 +122,12 @@ impl Loader {
 
         let extension = get_format_extension(output_format);
 
+        let config = PlayerConfig::default();
+
+        let mut input_format: Option<AudioFileFormat> = None;
+
         if let Ok(audio_item) = AudioItem::get_file(&self.session, track_ref).await {
+            input_format = get_input_format(&config, &audio_item);
             match audio_item.unique_fields {
                 UniqueFields::Track { artists, .. } => {
                     // music
@@ -93,7 +170,7 @@ impl Loader {
         let backend = audio_backend::find(Some("pipe".to_owned())).unwrap();
 
         let player = Player::new(
-            PlayerConfig::default(),
+            config,
             self.session.clone(),
             Box::new(NoOpVolume),
             move || backend(Some("temp.pcm".into()), AudioFormat::S16),
@@ -104,20 +181,42 @@ impl Loader {
         player.await_end_of_track().await;
 
         // Read track as stereo signed 16-bit PCM and encode into audio file
-        let mut cmd = tokio::process::Command::new("ffmpeg")
-            .arg("-y")
-            .arg("-hide_banner")
-            .arg("-loglevel")
-            .arg("error")
-            .arg("-f")
-            .arg("s16le")
-            .arg("-ac")
-            .arg("2")
-            .arg("-i")
-            .arg("temp.pcm")
-            .arg(output_file_name)
-            .spawn()
-            .expect("Failed to spawn ffmpeg, is it installed and on PATH?");
+        let mut cmd = if output_format == &OutputFormat::Wav || input_format.is_none() {
+            tokio::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-hide_banner")
+                .arg("-loglevel")
+                .arg("error")
+                .arg("-f")
+                .arg("s16le")
+                .arg("-ac")
+                .arg("2")
+                .arg("-i")
+                .arg("temp.pcm")
+                .arg(output_file_name)
+                .spawn()
+                .expect("Failed to spawn ffmpeg, is it installed and on PATH?")
+        } else {
+            // Set output bitrate to match downloaded audio
+            let bitrate = get_bitrate(&input_format.unwrap());
+            tokio::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-hide_banner")
+                .arg("-loglevel")
+                .arg("error")
+                .arg("-f")
+                .arg("s16le")
+                .arg("-ac")
+                .arg("2")
+                .arg("-i")
+                .arg("temp.pcm")
+                .arg("-b:a")
+                // Convert bitrate to bps
+                .arg((bitrate * 1000).to_string())
+                .arg(output_file_name)
+                .spawn()
+                .expect("Failed to spawn ffmpeg, is it installed and on PATH?")
+        };
 
         cmd.wait().await.unwrap_or_else(|e| {
             log::error!("Failed to wait for ffmpeg: {}", e);
