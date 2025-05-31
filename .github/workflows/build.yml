@@ -34,6 +34,7 @@ jobs:
       - name: Build and export artifacts
         if: runner.os == 'Windows'
         run: |
+          $Env:SOURCE_DATE_EPOCH = 1748642400
           cargo build --release
 
           mkdir release
@@ -43,6 +44,7 @@ jobs:
       - name: Build and export artifacts
         if: runner.os == 'Linux'
         run: |
+          export SOURCE_DATE_EPOCH=1748642400
           cargo build --release
 
           mkdir release
