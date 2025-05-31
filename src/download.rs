@@ -17,7 +17,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use tokio::fs::{File, create_dir_all};
 
-use crate::OutputFormat;
+use crate::{Args, OutputFormat};
 
 static FEATURE_TAG_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r" ?\((?:feat\.?|ft\.?|with) .+\)").unwrap());
@@ -134,14 +134,13 @@ impl Loader {
     pub async fn download_track(
         &self,
         track_ref: SpotifyId,
-        output_format: &OutputFormat,
-        remove_feature_tags: bool,
+        args: &Args,
         path_prefix: Option<&Path>,
         name_prefix: Option<&str>,
     ) {
         let output_file_name: String;
 
-        let extension = get_format_extension(output_format);
+        let extension = get_format_extension(&args.format);
 
         let config = PlayerConfig::default();
 
@@ -169,7 +168,7 @@ impl Loader {
                             .map(|artist| &*artist.name)
                             .collect::<Vec<&str>>()
                             .join(", "),
-                        if remove_feature_tags {
+                        if args.remove_feature_tags {
                             remove_feature_tag(audio_item.name)
                         } else {
                             audio_item.name
@@ -184,7 +183,7 @@ impl Loader {
                         "{} {} - {}.{}",
                         name_prefix.unwrap_or(""),
                         show_name,
-                        if remove_feature_tags {
+                        if args.remove_feature_tags {
                             remove_feature_tag(audio_item.name)
                         } else {
                             audio_item.name
@@ -217,7 +216,7 @@ impl Loader {
         player.await_end_of_track().await;
 
         // Read track as stereo signed 16-bit PCM and encode into audio file
-        let mut cmd = if output_format == &OutputFormat::Wav || input_format.is_none() {
+        let mut cmd = if args.format == OutputFormat::Wav || input_format.is_none() {
             tokio::process::Command::new("ffmpeg")
                 .arg("-y")
                 .arg("-hide_banner")
@@ -271,13 +270,7 @@ impl Loader {
         }
     }
 
-    pub async fn download_playlist(
-        &self,
-        playlist_ref: SpotifyId,
-        output_format: &OutputFormat,
-        remove_feature_tags: bool,
-        number_tracks: bool,
-    ) {
+    pub async fn download_playlist(&self, playlist_ref: SpotifyId, args: Args) {
         let plist = Playlist::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading playlist {}", plist.name());
 
@@ -289,15 +282,14 @@ impl Loader {
             return;
         };
 
-        if number_tracks {
+        if args.number_tracks {
             let length = plist.length;
             let mut idx = 1;
 
             for track_id in plist.tracks() {
                 self.download_track(
                     track_id.clone(),
-                    output_format,
-                    remove_feature_tags,
+                    &args,
                     Some(folder),
                     Some(&format_track_number(idx, length as usize)),
                 )
@@ -307,26 +299,14 @@ impl Loader {
             }
         } else {
             for track_id in plist.tracks() {
-                self.download_track(
-                    track_id.clone(),
-                    output_format,
-                    remove_feature_tags,
-                    Some(folder),
-                    None,
-                )
-                .await;
+                self.download_track(track_id.clone(), &args, Some(folder), None)
+                    .await;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
     }
 
-    pub async fn download_album(
-        &self,
-        playlist_ref: SpotifyId,
-        output_format: &OutputFormat,
-        remove_feature_tags: bool,
-        number_tracks: bool,
-    ) {
+    pub async fn download_album(&self, playlist_ref: SpotifyId, args: Args) {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
         let artists = album
             .artists
@@ -345,15 +325,14 @@ impl Loader {
 
         println!("Downloading album {} by {}", album.name, artists);
 
-        if number_tracks {
+        if args.number_tracks {
             let length = album.tracks().count();
             let mut idx = 1;
 
             for track_id in album.tracks() {
                 self.download_track(
                     track_id.clone(),
-                    output_format,
-                    remove_feature_tags,
+                    &args,
                     Some(folder),
                     Some(&format_track_number(idx, length)),
                 )
@@ -363,26 +342,14 @@ impl Loader {
             }
         } else {
             for track_id in album.tracks() {
-                self.download_track(
-                    track_id.clone(),
-                    output_format,
-                    remove_feature_tags,
-                    Some(folder),
-                    None,
-                )
-                .await;
+                self.download_track(track_id.clone(), &args, Some(folder), None)
+                    .await;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
     }
 
-    pub async fn download_show(
-        &self,
-        playlist_ref: SpotifyId,
-        output_format: &OutputFormat,
-        remove_feature_tags: bool,
-        number_tracks: bool,
-    ) {
+    pub async fn download_show(&self, playlist_ref: SpotifyId, args: Args) {
         let show = Show::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading show {} by {}", show.name, show.publisher);
 
@@ -393,15 +360,14 @@ impl Loader {
             return;
         };
 
-        if number_tracks {
+        if args.number_tracks {
             let length = show.episodes.len();
             let mut idx = 1;
 
             for episode_id in show.episodes.iter() {
                 self.download_track(
                     episode_id.clone(),
-                    output_format,
-                    remove_feature_tags,
+                    &args,
                     Some(folder),
                     Some(&format_track_number(idx, length)),
                 )
@@ -411,47 +377,20 @@ impl Loader {
             }
         } else {
             for episode_id in show.episodes.iter() {
-                self.download_track(
-                    episode_id.clone(),
-                    output_format,
-                    remove_feature_tags,
-                    Some(folder),
-                    None,
-                )
-                .await;
+                self.download_track(episode_id.clone(), &args, Some(folder), None)
+                    .await;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
     }
 
-    pub async fn download(
-        &self,
-        item_ref: SpotifyId,
-        output_format: &OutputFormat,
-        number_tracks: bool,
-        remove_feature_tags: bool,
-    ) {
+    pub async fn download(&self, item_ref: SpotifyId, args: Args) {
         match item_ref.item_type {
-            SpotifyItemType::Track => {
-                self.download_track(item_ref, output_format, remove_feature_tags, None, None)
-                    .await
-            }
-            SpotifyItemType::Album => {
-                self.download_album(item_ref, output_format, remove_feature_tags, number_tracks)
-                    .await
-            }
-            SpotifyItemType::Playlist => {
-                self.download_playlist(item_ref, output_format, remove_feature_tags, number_tracks)
-                    .await
-            }
-            SpotifyItemType::Episode => {
-                self.download_track(item_ref, output_format, remove_feature_tags, None, None)
-                    .await
-            }
-            SpotifyItemType::Show => {
-                self.download_show(item_ref, output_format, remove_feature_tags, number_tracks)
-                    .await
-            }
+            SpotifyItemType::Track => self.download_track(item_ref, &args, None, None).await,
+            SpotifyItemType::Album => self.download_album(item_ref, args).await,
+            SpotifyItemType::Playlist => self.download_playlist(item_ref, args).await,
+            SpotifyItemType::Episode => self.download_track(item_ref, &args, None, None).await,
+            SpotifyItemType::Show => self.download_show(item_ref, args).await,
             _ => {
                 log::error!("Unsupported item type: {:?}", item_ref.item_type);
                 std::process::exit(1);
