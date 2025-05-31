@@ -36,6 +36,10 @@ struct Args {
     /// Add track number to file names when downloading an album or playlist
     #[arg(short, long, default_value_t = false)]
     number_tracks: bool,
+
+    /// Only show main artist on titles if there's more than one
+    #[arg(short, long, default_value_t = false)]
+    main_artist_only: bool,
 }
 
 fn parse_item_type(item_type: &str) -> SpotifyItemType {

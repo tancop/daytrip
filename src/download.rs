@@ -163,11 +163,18 @@ impl Loader {
                     output_file_name = format!(
                         "{} {} - {}.{}",
                         name_prefix.unwrap_or(""),
-                        artists
-                            .iter()
-                            .map(|artist| &*artist.name)
-                            .collect::<Vec<&str>>()
-                            .join(", "),
+                        if args.main_artist_only {
+                            artists
+                                .first()
+                                .map(|artist| artist.name.to_owned())
+                                .unwrap_or("".to_owned())
+                        } else {
+                            artists
+                                .iter()
+                                .map(|artist| &*artist.name)
+                                .collect::<Vec<&str>>()
+                                .join(", ")
+                        },
                         if args.remove_feature_tags {
                             remove_feature_tag(audio_item.name)
                         } else {
@@ -308,12 +315,20 @@ impl Loader {
 
     pub async fn download_album(&self, playlist_ref: SpotifyId, args: Args) {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
-        let artists = album
-            .artists
-            .iter()
-            .map(|artist| &*artist.name)
-            .collect::<Vec<&str>>()
-            .join(", ");
+        let artists = if args.main_artist_only {
+            album
+                .artists
+                .first()
+                .map(|artist| artist.name.to_owned())
+                .unwrap_or("".to_owned())
+        } else {
+            album
+                .artists
+                .iter()
+                .map(|artist| &*artist.name)
+                .collect::<Vec<&str>>()
+                .join(", ")
+        };
 
         let folder_name = format!("{} - {}", artists, album.name);
         let folder = Path::new(&folder_name);
