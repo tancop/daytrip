@@ -33,6 +33,11 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     remove_feature_tags: bool,
 
+    /// Regular expression used to filter track titles. Any captures
+    /// will be removed
+    #[arg(short, long)]
+    track_title_filter: Option<String>,
+
     /// Add track number to file names when downloading an album or playlist
     #[arg(short, long, default_value_t = false)]
     number_tracks: bool,

@@ -1,9 +1,10 @@
-use std::path::Path;
+use std::{borrow::Cow, path::Path};
 
 use librespot::{
     core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
         Album, Metadata, Playlist, Show,
+        artist::ArtistsWithRole,
         audio::{AudioFileFormat, AudioItem, UniqueFields},
     },
     playback::{
@@ -13,7 +14,7 @@ use librespot::{
         player::Player,
     },
 };
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use regex::Regex;
 use tokio::fs::{File, create_dir_all};
 
@@ -21,6 +22,8 @@ use crate::{Args, OutputFormat};
 
 static FEATURE_TAG_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r" ?\((?:feat\.?|ft\.?|with) .+\)").unwrap());
+
+static REGEX_FILTER: OnceCell<Regex> = OnceCell::new();
 
 /// Replace characters illegal in a path on Windows or Linux
 fn legalize_name(name: String) -> String {
@@ -122,6 +125,14 @@ fn format_track_number(number: usize, total_tracks: usize) -> String {
     format!("{:0width$}", number, width = digits)
 }
 
+fn get_artists_line(artists: &ArtistsWithRole) -> String {
+    artists
+        .iter()
+        .map(|artist| &*artist.name)
+        .collect::<Vec<&str>>()
+        .join(", ")
+}
+
 pub struct Loader {
     session: Session,
 }
@@ -151,15 +162,21 @@ impl Loader {
             match audio_item.unique_fields {
                 UniqueFields::Track { artists, .. } => {
                     // music
-                    println!(
-                        "Downloading {} by {}",
-                        audio_item.name,
-                        artists
-                            .iter()
-                            .map(|artist| &*artist.name)
-                            .collect::<Vec<&str>>()
-                            .join(", ")
-                    );
+                    let artists_line = get_artists_line(&artists);
+
+                    println!("Downloading {} by {}", &audio_item.name, artists_line);
+
+                    let title = if args.remove_feature_tags {
+                        remove_feature_tag(audio_item.name)
+                    } else {
+                        audio_item.name
+                    };
+
+                    let title = match REGEX_FILTER.get() {
+                        Some(re) => re.replace_all(&title, ""),
+                        None => Cow::from(&title),
+                    };
+
                     output_file_name = format!(
                         "{} {} - {}.{}",
                         name_prefix.unwrap_or(""),
@@ -169,32 +186,32 @@ impl Loader {
                                 .map(|artist| artist.name.to_owned())
                                 .unwrap_or("".to_owned())
                         } else {
-                            artists
-                                .iter()
-                                .map(|artist| &*artist.name)
-                                .collect::<Vec<&str>>()
-                                .join(", ")
+                            artists_line
                         },
-                        if args.remove_feature_tags {
-                            remove_feature_tag(audio_item.name)
-                        } else {
-                            audio_item.name
-                        },
+                        title,
                         extension
                     );
                 }
                 UniqueFields::Episode { show_name, .. } => {
                     // podcast
                     println!("Downloading {} from {}", audio_item.name, show_name);
+
+                    let title = if args.remove_feature_tags {
+                        remove_feature_tag(audio_item.name)
+                    } else {
+                        audio_item.name
+                    };
+
+                    let title = match REGEX_FILTER.get() {
+                        Some(re) => re.replace_all(&title, ""),
+                        None => Cow::from(&title),
+                    };
+
                     output_file_name = format!(
                         "{} {} - {}.{}",
                         name_prefix.unwrap_or(""),
                         show_name,
-                        if args.remove_feature_tags {
-                            remove_feature_tag(audio_item.name)
-                        } else {
-                            audio_item.name
-                        },
+                        title,
                         extension
                     );
                 }
@@ -400,6 +417,17 @@ impl Loader {
     }
 
     pub async fn download(&self, item_ref: SpotifyId, args: Args) {
+        if let Some(filter) = &args.track_title_filter {
+            match Regex::new(filter) {
+                Ok(re) => {
+                    _ = REGEX_FILTER.try_insert(re).unwrap();
+                }
+                Err(e) => {
+                    log::warn!("Invalid regex filter: {}", e);
+                }
+            };
+        }
+
         match item_ref.item_type {
             SpotifyItemType::Track => self.download_track(item_ref, &args, None, None).await,
             SpotifyItemType::Album => self.download_album(item_ref, args).await,

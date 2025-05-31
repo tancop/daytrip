@@ -43,12 +43,49 @@ Arguments:
   <URL>  Share link or Spotify URI for the downloaded item
 
 Options:
-  -f, --format <FORMAT>      Output audio format [default: opus] [possible values: opus, wav, ogg, mp3]
-  -r, --remove-feature-tags  Remove tags like `(feat. Artist Name)` from track titles
-  -n, --number-tracks        Add track number to file names when downloading an album or playlist
-  -h, --help                 Print help
-  -V, --version              Print version
+  -f, --format <FORMAT>
+          Output audio format [default: opus] [possible values: opus, wav, ogg, mp3]
+  -r, --remove-feature-tags
+          Remove tags like `(feat. Artist Name)` from track titles
+  -t, --track-title-filter <TRACK_TITLE_FILTER>
+          Regular expression used to filter track titles. Any captures will be removed
+  -n, --number-tracks
+          Add track number to file names when downloading an album or playlist
+  -m, --main-artist-only
+          Only show main artist on titles if there's more than one
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
+
+### Title Cleanup
+
+The `-r` option is useful for cleaning up messy titles with a long feature list:
+
+```
+daytrip https://open.spotify.com/track/4X5f3vT8MRuXF68pfjNte5 -r
+```
+
+- Without filter: `A$AP Rocky, Drake, 2 Chainz, Kendrick Lamar - F**kin' Problems (feat. Drake, 2 Chainz & Kendrick Lamar)`
+- With filter: `A$AP Rocky, Drake, 2 Chainz, Kendrick Lamar - F**kin' Problems`
+
+You might need a custom regex filter with `-t` in more complicated cases, like this one to remove everything inside `( )`:
+
+```
+daytrip https://open.spotify.com/track/39MK3d3fonIP8Mz9oHCTBB -t '( ?\(.+?\))'
+```
+
+- Without filter: `Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate (Spider-Man: Across the Spider-Verse) (Metro Boomin & Swae Lee, Lil Wayne, Offset)`
+- With filter: `Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate`
+
+Or you can do it in reverse with `-m`:
+
+```
+daytrip https://open.spotify.com/track/4X5f3vT8MRuXF68pfjNte5 -m
+```
+
+- `A$AP Rocky - F**kin' Problems (feat. Drake, 2 Chainz & Kendrick Lamar)`
 
 ## Downloads
 
