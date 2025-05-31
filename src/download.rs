@@ -15,9 +15,20 @@ use librespot::{
 };
 use tokio::fs::{File, create_dir_all};
 
+use crate::OutputFormat;
+
 /// Replace characters illegal in a path on Windows or Linux
 fn legalize_name(name: String) -> String {
     name.replace(&['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+}
+
+fn get_format_extension(format: &OutputFormat) -> &str {
+    match format {
+        OutputFormat::Opus => "opus",
+        OutputFormat::Mp3 => "mp3",
+        OutputFormat::Ogg => "ogg",
+        OutputFormat::Wav => "wav",
+    }
 }
 
 pub struct Loader {
@@ -29,8 +40,15 @@ impl Loader {
         Self { session }
     }
 
-    pub async fn download_track(&self, track_ref: SpotifyId, path_prefix: Option<&Path>) {
+    pub async fn download_track(
+        &self,
+        track_ref: SpotifyId,
+        output_format: &OutputFormat,
+        path_prefix: Option<&Path>,
+    ) {
         let output_file_name: String;
+
+        let extension = get_format_extension(output_format);
 
         if let Ok(audio_item) = AudioItem::get_file(&self.session, track_ref).await {
             match audio_item.unique_fields {
@@ -46,24 +64,25 @@ impl Loader {
                             .join(", ")
                     );
                     output_file_name = format!(
-                        "{} - {}.opus",
+                        "{} - {}.{}",
                         artists
                             .iter()
                             .map(|artist| &*artist.name)
                             .collect::<Vec<&str>>()
                             .join(", "),
-                        audio_item.name
+                        audio_item.name,
+                        extension
                     );
                 }
                 UniqueFields::Episode { show_name, .. } => {
                     // podcast
                     println!("Downloading {} from {}", audio_item.name, show_name);
-                    output_file_name = format!("{} - {}.opus", show_name, audio_item.name);
+                    output_file_name = format!("{} - {}.{}", show_name, audio_item.name, extension);
                 }
             };
         } else {
             log::warn!("Failed to get audio item name, falling back to ID");
-            output_file_name = format!("{}.opus", track_ref.to_base62().unwrap());
+            output_file_name = format!("{}.{}", track_ref.to_base62().unwrap(), extension);
         }
 
         let output_file_name = match path_prefix {
@@ -84,7 +103,7 @@ impl Loader {
 
         player.await_end_of_track().await;
 
-        // Read track as stereo signed 16-bit PCM and encode into a opus file
+        // Read track as stereo signed 16-bit PCM and encode into audio file
         let mut cmd = tokio::process::Command::new("ffmpeg")
             .arg("-y")
             .arg("-hide_banner")
@@ -117,7 +136,7 @@ impl Loader {
         }
     }
 
-    pub async fn download_playlist(&self, playlist_ref: SpotifyId) {
+    pub async fn download_playlist(&self, playlist_ref: SpotifyId, output_format: &OutputFormat) {
         let plist = Playlist::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading playlist {}", plist.name());
 
@@ -130,12 +149,13 @@ impl Loader {
         };
 
         for track_id in plist.tracks() {
-            self.download_track(track_id.clone(), Some(folder)).await;
+            self.download_track(track_id.clone(), output_format, Some(folder))
+                .await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
-    pub async fn download_album(&self, playlist_ref: SpotifyId) {
+    pub async fn download_album(&self, playlist_ref: SpotifyId, output_format: &OutputFormat) {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
         let artists = album
             .artists
@@ -154,12 +174,13 @@ impl Loader {
 
         println!("Downloading album {} by {}", album.name, artists);
         for track_id in album.tracks() {
-            self.download_track(track_id.clone(), Some(folder)).await;
+            self.download_track(track_id.clone(), output_format, Some(folder))
+                .await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
-    pub async fn download_show(&self, playlist_ref: SpotifyId) {
+    pub async fn download_show(&self, playlist_ref: SpotifyId, output_format: &OutputFormat) {
         let show = Show::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading show {} by {}", show.name, show.publisher);
 
@@ -171,18 +192,19 @@ impl Loader {
         };
 
         for episode_id in show.episodes.iter() {
-            self.download_track(episode_id.clone(), Some(folder)).await;
+            self.download_track(episode_id.clone(), output_format, Some(folder))
+                .await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
-    pub async fn download(&self, item_ref: SpotifyId) {
+    pub async fn download(&self, item_ref: SpotifyId, output_format: &OutputFormat) {
         match item_ref.item_type {
-            SpotifyItemType::Track => self.download_track(item_ref, None).await,
-            SpotifyItemType::Album => self.download_album(item_ref).await,
-            SpotifyItemType::Playlist => self.download_playlist(item_ref).await,
-            SpotifyItemType::Episode => self.download_track(item_ref, None).await,
-            SpotifyItemType::Show => self.download_show(item_ref).await,
+            SpotifyItemType::Track => self.download_track(item_ref, output_format, None).await,
+            SpotifyItemType::Album => self.download_album(item_ref, output_format).await,
+            SpotifyItemType::Playlist => self.download_playlist(item_ref, output_format).await,
+            SpotifyItemType::Episode => self.download_track(item_ref, output_format, None).await,
+            SpotifyItemType::Show => self.download_show(item_ref, output_format).await,
             _ => {
                 log::error!("Unsupported item type: {:?}", item_ref.item_type);
                 std::process::exit(1);

@@ -140,7 +140,7 @@ async fn main() {
 
     let loader = Loader::new(session);
 
-    loader.download(item_ref).await;
+    loader.download(item_ref, &args.format).await;
 
     let _ = tokio::fs::remove_file("temp.pcm").await;
 
