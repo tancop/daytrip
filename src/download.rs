@@ -13,9 +13,14 @@ use librespot::{
         player::Player,
     },
 };
+use once_cell::sync::Lazy;
+use regex::Regex;
 use tokio::fs::{File, create_dir_all};
 
 use crate::OutputFormat;
+
+static FEATURE_TAG_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r" ?\((?:feat\.?|ft\.?|with) .+\)").unwrap());
 
 /// Replace characters illegal in a path on Windows or Linux
 fn legalize_name(name: String) -> String {
@@ -103,6 +108,20 @@ fn get_bitrate(format: &AudioFileFormat) -> u32 {
     }
 }
 
+fn remove_feature_tag(mut title: String) -> String {
+    if let Some(matched) = FEATURE_TAG_REGEX.find(&title) {
+        title.replace_range(matched.range(), "")
+    }
+    title
+}
+
+/// Format a track number to start with the right amount of zeros
+fn format_track_number(number: usize, total_tracks: usize) -> String {
+    let digits = (total_tracks as f32).log10().ceil() as usize;
+
+    format!("{:0width$}", number, width = digits)
+}
+
 pub struct Loader {
     session: Session,
 }
@@ -116,7 +135,9 @@ impl Loader {
         &self,
         track_ref: SpotifyId,
         output_format: &OutputFormat,
+        remove_feature_tags: bool,
         path_prefix: Option<&Path>,
+        name_prefix: Option<&str>,
     ) {
         let output_file_name: String;
 
@@ -141,20 +162,35 @@ impl Loader {
                             .join(", ")
                     );
                     output_file_name = format!(
-                        "{} - {}.{}",
+                        "{} {} - {}.{}",
+                        name_prefix.unwrap_or(""),
                         artists
                             .iter()
                             .map(|artist| &*artist.name)
                             .collect::<Vec<&str>>()
                             .join(", "),
-                        audio_item.name,
+                        if remove_feature_tags {
+                            remove_feature_tag(audio_item.name)
+                        } else {
+                            audio_item.name
+                        },
                         extension
                     );
                 }
                 UniqueFields::Episode { show_name, .. } => {
                     // podcast
                     println!("Downloading {} from {}", audio_item.name, show_name);
-                    output_file_name = format!("{} - {}.{}", show_name, audio_item.name, extension);
+                    output_file_name = format!(
+                        "{} {} - {}.{}",
+                        name_prefix.unwrap_or(""),
+                        show_name,
+                        if remove_feature_tags {
+                            remove_feature_tag(audio_item.name)
+                        } else {
+                            audio_item.name
+                        },
+                        extension
+                    );
                 }
             };
         } else {
@@ -235,7 +271,13 @@ impl Loader {
         }
     }
 
-    pub async fn download_playlist(&self, playlist_ref: SpotifyId, output_format: &OutputFormat) {
+    pub async fn download_playlist(
+        &self,
+        playlist_ref: SpotifyId,
+        output_format: &OutputFormat,
+        remove_feature_tags: bool,
+        number_tracks: bool,
+    ) {
         let plist = Playlist::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading playlist {}", plist.name());
 
@@ -247,14 +289,44 @@ impl Loader {
             return;
         };
 
-        for track_id in plist.tracks() {
-            self.download_track(track_id.clone(), output_format, Some(folder))
+        if number_tracks {
+            let length = plist.length;
+            let mut idx = 1;
+
+            for track_id in plist.tracks() {
+                self.download_track(
+                    track_id.clone(),
+                    output_format,
+                    remove_feature_tags,
+                    Some(folder),
+                    Some(&format_track_number(idx, length as usize)),
+                )
                 .await;
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                idx += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        } else {
+            for track_id in plist.tracks() {
+                self.download_track(
+                    track_id.clone(),
+                    output_format,
+                    remove_feature_tags,
+                    Some(folder),
+                    None,
+                )
+                .await;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
         }
     }
 
-    pub async fn download_album(&self, playlist_ref: SpotifyId, output_format: &OutputFormat) {
+    pub async fn download_album(
+        &self,
+        playlist_ref: SpotifyId,
+        output_format: &OutputFormat,
+        remove_feature_tags: bool,
+        number_tracks: bool,
+    ) {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
         let artists = album
             .artists
@@ -272,14 +344,45 @@ impl Loader {
         };
 
         println!("Downloading album {} by {}", album.name, artists);
-        for track_id in album.tracks() {
-            self.download_track(track_id.clone(), output_format, Some(folder))
+
+        if number_tracks {
+            let length = album.tracks().count();
+            let mut idx = 1;
+
+            for track_id in album.tracks() {
+                self.download_track(
+                    track_id.clone(),
+                    output_format,
+                    remove_feature_tags,
+                    Some(folder),
+                    Some(&format_track_number(idx, length)),
+                )
                 .await;
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                idx += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        } else {
+            for track_id in album.tracks() {
+                self.download_track(
+                    track_id.clone(),
+                    output_format,
+                    remove_feature_tags,
+                    Some(folder),
+                    None,
+                )
+                .await;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
         }
     }
 
-    pub async fn download_show(&self, playlist_ref: SpotifyId, output_format: &OutputFormat) {
+    pub async fn download_show(
+        &self,
+        playlist_ref: SpotifyId,
+        output_format: &OutputFormat,
+        remove_feature_tags: bool,
+        number_tracks: bool,
+    ) {
         let show = Show::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading show {} by {}", show.name, show.publisher);
 
@@ -290,20 +393,65 @@ impl Loader {
             return;
         };
 
-        for episode_id in show.episodes.iter() {
-            self.download_track(episode_id.clone(), output_format, Some(folder))
+        if number_tracks {
+            let length = show.episodes.len();
+            let mut idx = 1;
+
+            for episode_id in show.episodes.iter() {
+                self.download_track(
+                    episode_id.clone(),
+                    output_format,
+                    remove_feature_tags,
+                    Some(folder),
+                    Some(&format_track_number(idx, length)),
+                )
                 .await;
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                idx += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        } else {
+            for episode_id in show.episodes.iter() {
+                self.download_track(
+                    episode_id.clone(),
+                    output_format,
+                    remove_feature_tags,
+                    Some(folder),
+                    None,
+                )
+                .await;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
         }
     }
 
-    pub async fn download(&self, item_ref: SpotifyId, output_format: &OutputFormat) {
+    pub async fn download(
+        &self,
+        item_ref: SpotifyId,
+        output_format: &OutputFormat,
+        number_tracks: bool,
+        remove_feature_tags: bool,
+    ) {
         match item_ref.item_type {
-            SpotifyItemType::Track => self.download_track(item_ref, output_format, None).await,
-            SpotifyItemType::Album => self.download_album(item_ref, output_format).await,
-            SpotifyItemType::Playlist => self.download_playlist(item_ref, output_format).await,
-            SpotifyItemType::Episode => self.download_track(item_ref, output_format, None).await,
-            SpotifyItemType::Show => self.download_show(item_ref, output_format).await,
+            SpotifyItemType::Track => {
+                self.download_track(item_ref, output_format, remove_feature_tags, None, None)
+                    .await
+            }
+            SpotifyItemType::Album => {
+                self.download_album(item_ref, output_format, remove_feature_tags, number_tracks)
+                    .await
+            }
+            SpotifyItemType::Playlist => {
+                self.download_playlist(item_ref, output_format, remove_feature_tags, number_tracks)
+                    .await
+            }
+            SpotifyItemType::Episode => {
+                self.download_track(item_ref, output_format, remove_feature_tags, None, None)
+                    .await
+            }
+            SpotifyItemType::Show => {
+                self.download_show(item_ref, output_format, remove_feature_tags, number_tracks)
+                    .await
+            }
             _ => {
                 log::error!("Unsupported item type: {:?}", item_ref.item_type);
                 std::process::exit(1);

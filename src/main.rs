@@ -9,7 +9,7 @@ use serde::Serialize;
 mod auth;
 mod download;
 
-#[derive(clap::ValueEnum, Clone, Default, Debug, Serialize)]
+#[derive(clap::ValueEnum, Clone, Default, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 enum OutputFormat {
     #[default]
@@ -140,7 +140,14 @@ async fn main() {
 
     let loader = Loader::new(session);
 
-    loader.download(item_ref, &args.format).await;
+    loader
+        .download(
+            item_ref,
+            &args.format,
+            args.number_tracks,
+            args.remove_feature_tags,
+        )
+        .await;
 
     let _ = tokio::fs::remove_file("temp.pcm").await;
 

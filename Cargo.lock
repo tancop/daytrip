@@ -610,6 +610,7 @@ dependencies = [
  "librespot",
  "librespot-oauth",
  "log",
+ "once_cell",
  "regex",
  "serde",
  "tokio",
