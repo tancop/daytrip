@@ -11,7 +11,7 @@ use librespot::{
         audio_backend,
         config::{AudioFormat, Bitrate, PlayerConfig},
         mixer::NoOpVolume,
-        player::Player,
+        player::{Player, PlayerEvent},
     },
 };
 use once_cell::sync::{Lazy, OnceCell};
@@ -235,9 +235,24 @@ impl Loader {
             move || backend(Some("temp.pcm".into()), AudioFormat::S16),
         );
 
+        let mut rx = player.get_player_event_channel();
+
         player.load(track_ref, true, 0);
 
+        let player_ref = player.clone();
+
+        let task = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let PlayerEvent::Unavailable { .. } = event {
+                    log::error!("Player is unavailable");
+                    player_ref.stop();
+                    break;
+                }
+            }
+        });
+
         player.await_end_of_track().await;
+        task.abort();
 
         // Read track as stereo signed 16-bit PCM and encode into audio file
         let mut cmd = if args.format == OutputFormat::Wav || input_format.is_none() {
