@@ -226,7 +226,7 @@ impl Loader {
                     };
 
                     output_file_name = format!(
-                        "{} {} - {}.{}",
+                        "{}{} - {}.{}",
                         name_prefix.unwrap_or(""),
                         if args.main_artist_only {
                             artists
@@ -256,7 +256,7 @@ impl Loader {
                     };
 
                     output_file_name = format!(
-                        "{} {} - {}.{}",
+                        "{}{} - {}.{}",
                         name_prefix.unwrap_or(""),
                         show_name,
                         title,
