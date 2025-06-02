@@ -53,6 +53,10 @@ Options:
           Add track number to file names when downloading an album or playlist
   -m, --main-artist-only
           Only show main artist on titles if there's more than one
+      --force
+          Always download tracks even if they already exist
+      --max-tries <MAX_TRIES>
+          Maximum number of retries for failed requests [default: 3]
   -h, --help
           Print help
   -V, --version
