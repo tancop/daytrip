@@ -46,6 +46,10 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     main_artist_only: bool,
 
+    /// Always download tracks even if they already exist
+    #[arg(long = "force", default_value_t = false)]
+    force_download: bool,
+
     /// Maximum number of retries for failed requests
     #[arg(long, default_value_t = 3)]
     max_tries: u32,

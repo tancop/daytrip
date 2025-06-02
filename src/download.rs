@@ -212,8 +212,6 @@ impl Loader {
                     // music
                     let artists_line = get_artists_line(&artists);
 
-                    println!("Downloading {} by {}", &audio_item.name, artists_line);
-
                     let title = if args.remove_feature_tags {
                         remove_feature_tag(audio_item.name)
                     } else {
@@ -242,7 +240,6 @@ impl Loader {
                 }
                 UniqueFields::Episode { show_name, .. } => {
                     // podcast
-                    println!("Downloading {} from {}", audio_item.name, show_name);
 
                     let title = if args.remove_feature_tags {
                         remove_feature_tag(audio_item.name)
@@ -268,6 +265,17 @@ impl Loader {
             log::warn!("Failed to get audio item name, falling back to ID");
             output_file_name = format!("{}.{}", track_ref.to_base62().unwrap(), extension);
         }
+
+        let search_path = match path_prefix {
+            Some(prefix) => &prefix.join(&output_file_name),
+            None => Path::new(&output_file_name),
+        };
+
+        if !args.force_download && search_path.exists() {
+            println!("Skipping {output_file_name}");
+            return Ok(());
+        }
+        println!("Downloading {output_file_name}");
 
         let output_file_name = match path_prefix {
             Some(prefix) => prefix.join(&legalize_name(output_file_name)),
