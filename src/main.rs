@@ -45,6 +45,10 @@ struct Args {
     /// Only show main artist on titles if there's more than one
     #[arg(short, long, default_value_t = false)]
     main_artist_only: bool,
+
+    /// Maximum number of retries for failed requests
+    #[arg(long, default_value_t = 3)]
+    max_tries: u32,
 }
 
 fn parse_item_type(item_type: &str) -> SpotifyItemType {

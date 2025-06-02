@@ -1,5 +1,14 @@
-use std::{borrow::Cow, path::Path};
+use anyhow::{anyhow, bail};
+use std::{
+    borrow::Cow,
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
+use anyhow::Context;
 use librespot::{
     core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
@@ -16,7 +25,10 @@ use librespot::{
 };
 use once_cell::sync::{Lazy, OnceCell};
 use regex::Regex;
-use tokio::fs::{File, create_dir_all};
+use tokio::{
+    fs::{File, create_dir_all},
+    process::Child,
+};
 
 use crate::{Args, OutputFormat};
 
@@ -133,6 +145,42 @@ fn get_artists_line(artists: &ArtistsWithRole) -> String {
         .join(", ")
 }
 
+fn get_ffmpeg_command(
+    args: &Args,
+    input_format: Option<AudioFileFormat>,
+    output_file_name: &Path,
+) -> Result<Child, std::io::Error> {
+    // Read track as stereo signed 16-bit PCM and encode into audio file
+    const COMMON_ARGS: &[&str] = &[
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "s16le",
+        "-ac",
+        "2",
+        "-i",
+        "temp.pcm",
+    ];
+    if args.format == OutputFormat::Wav || input_format.is_none() {
+        tokio::process::Command::new("ffmpeg")
+            .args(COMMON_ARGS)
+            .arg(output_file_name)
+            .spawn()
+    } else {
+        // Set output bitrate to match downloaded audio
+        let bitrate = get_bitrate(&input_format.unwrap());
+        tokio::process::Command::new("ffmpeg")
+            .args(COMMON_ARGS)
+            .arg("-b:a")
+            // Convert bitrate to bps
+            .arg((bitrate * 1000).to_string())
+            .arg(output_file_name)
+            .spawn()
+    }
+}
+
 pub struct Loader {
     session: Session,
 }
@@ -148,7 +196,7 @@ impl Loader {
         args: &Args,
         path_prefix: Option<&Path>,
         name_prefix: Option<&str>,
-    ) {
+    ) -> anyhow::Result<()> {
         let output_file_name: String;
 
         let extension = get_format_extension(&args.format);
@@ -226,7 +274,8 @@ impl Loader {
             None => legalize_name(output_file_name).into(),
         };
 
-        let backend = audio_backend::find(Some("pipe".to_owned())).unwrap();
+        let backend = audio_backend::find(Some("pipe".to_owned()))
+            .ok_or_else(|| anyhow!("Failed to find audio backend"))?;
 
         let player = Player::new(
             config,
@@ -241,10 +290,13 @@ impl Loader {
 
         let player_ref = player.clone();
 
+        let success = Arc::from(AtomicBool::from(true));
+        let success2 = success.clone();
+
         let task = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let PlayerEvent::Unavailable { .. } = event {
-                    log::error!("Player is unavailable");
+                    success2.store(false, Ordering::Relaxed);
                     player_ref.stop();
                     break;
                 }
@@ -254,98 +306,67 @@ impl Loader {
         player.await_end_of_track().await;
         task.abort();
 
-        // Read track as stereo signed 16-bit PCM and encode into audio file
-        let mut cmd = if args.format == OutputFormat::Wav || input_format.is_none() {
-            tokio::process::Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-hide_banner")
-                .arg("-loglevel")
-                .arg("error")
-                .arg("-f")
-                .arg("s16le")
-                .arg("-ac")
-                .arg("2")
-                .arg("-i")
-                .arg("temp.pcm")
-                .arg(output_file_name)
-                .spawn()
-                .expect("Failed to spawn ffmpeg, is it installed and on PATH?")
-        } else {
-            // Set output bitrate to match downloaded audio
-            let bitrate = get_bitrate(&input_format.unwrap());
-            tokio::process::Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-hide_banner")
-                .arg("-loglevel")
-                .arg("error")
-                .arg("-f")
-                .arg("s16le")
-                .arg("-ac")
-                .arg("2")
-                .arg("-i")
-                .arg("temp.pcm")
-                .arg("-b:a")
-                // Convert bitrate to bps
-                .arg((bitrate * 1000).to_string())
-                .arg(output_file_name)
-                .spawn()
-                .expect("Failed to spawn ffmpeg, is it installed and on PATH?")
-        };
-
-        cmd.wait().await.unwrap_or_else(|e| {
-            log::error!("Failed to wait for ffmpeg: {}", e);
-            std::process::exit(1);
-        });
-
-        let file = match File::create("temp.pcm").await {
-            Ok(file) => file,
-            Err(e) => {
-                log::error!("Failed to open new temp.pcm {}", e);
-                return;
-            }
-        };
-        if let Err(e) = file.set_len(0).await {
-            log::error!("Failed to truncate temp.pcm: {}", e);
+        if !success.load(Ordering::Relaxed) {
+            bail!("Failed to download track");
         }
+
+        let mut cmd = get_ffmpeg_command(args, input_format, &output_file_name)?;
+
+        cmd.wait().await.context("Failed to wait for ffmpeg")?;
+
+        let file = File::create("temp.pcm")
+            .await
+            .context("Failed to open temp.pcm for cleanup")?;
+
+        file.set_len(0)
+            .await
+            .context("Failed to truncate temp.pcm")?;
+
+        Ok(())
     }
 
-    pub async fn download_playlist(&self, playlist_ref: SpotifyId, args: Args) {
+    pub async fn download_playlist(
+        &self,
+        playlist_ref: SpotifyId,
+        args: Args,
+    ) -> anyhow::Result<()> {
         let plist = Playlist::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading playlist {}", plist.name());
 
         let name = plist.name();
         let folder = Path::new(&name);
 
-        if let Err(e) = create_dir_all(folder).await {
-            log::error!("Failed to create playlist folder: {}", e);
-            return;
-        };
+        create_dir_all(folder)
+            .await
+            .context("Failed to create playlist folder")?;
 
         if args.number_tracks {
             let length = plist.length;
             let mut idx = 1;
 
             for track_id in plist.tracks() {
-                self.download_track(
+                self.download_track_with_retry(
                     track_id.clone(),
                     &args,
                     Some(folder),
                     Some(&format_track_number(idx, length as usize)),
                 )
-                .await;
+                .await?;
                 idx += 1;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         } else {
             for track_id in plist.tracks() {
-                self.download_track(track_id.clone(), &args, Some(folder), None)
-                    .await;
+                self.download_track_with_retry(track_id.clone(), &args, Some(folder), None)
+                    .await?;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
+
+        Ok(())
     }
 
-    pub async fn download_album(&self, playlist_ref: SpotifyId, args: Args) {
+    pub async fn download_album(&self, playlist_ref: SpotifyId, args: Args) -> anyhow::Result<()> {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
         let artists = if args.main_artist_only {
             album
@@ -365,10 +386,9 @@ impl Loader {
         let folder_name = format!("{} - {}", artists, album.name);
         let folder = Path::new(&folder_name);
 
-        if let Err(e) = create_dir_all(folder).await {
-            log::error!("Failed to create album folder: {}", e);
-            return;
-        };
+        create_dir_all(folder)
+            .await
+            .context("Failed to create album folder")?;
 
         println!("Downloading album {} by {}", album.name, artists);
 
@@ -377,58 +397,85 @@ impl Loader {
             let mut idx = 1;
 
             for track_id in album.tracks() {
-                self.download_track(
+                self.download_track_with_retry(
                     track_id.clone(),
                     &args,
                     Some(folder),
-                    Some(&format_track_number(idx, length)),
+                    Some(&format_track_number(idx, length as usize)),
                 )
-                .await;
+                .await?;
                 idx += 1;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         } else {
             for track_id in album.tracks() {
-                self.download_track(track_id.clone(), &args, Some(folder), None)
-                    .await;
+                self.download_track_with_retry(track_id.clone(), &args, Some(folder), None)
+                    .await?;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
+
+        Ok(())
     }
 
-    pub async fn download_show(&self, playlist_ref: SpotifyId, args: Args) {
+    pub async fn download_show(&self, playlist_ref: SpotifyId, args: Args) -> anyhow::Result<()> {
         let show = Show::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading show {} by {}", show.name, show.publisher);
 
         let folder = Path::new(&show.name);
 
-        if let Err(e) = create_dir_all(folder).await {
-            log::error!("Failed to create show folder: {}", e);
-            return;
-        };
+        create_dir_all(folder)
+            .await
+            .context("Failed to create show folder")?;
 
         if args.number_tracks {
             let length = show.episodes.len();
             let mut idx = 1;
 
             for episode_id in show.episodes.iter() {
-                self.download_track(
+                self.download_track_with_retry(
                     episode_id.clone(),
                     &args,
                     Some(folder),
-                    Some(&format_track_number(idx, length)),
+                    Some(&format_track_number(idx, length as usize)),
                 )
-                .await;
+                .await?;
                 idx += 1;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         } else {
             for episode_id in show.episodes.iter() {
-                self.download_track(episode_id.clone(), &args, Some(folder), None)
-                    .await;
+                self.download_track_with_retry(episode_id.clone(), &args, Some(folder), None)
+                    .await?;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
+
+        Ok(())
+    }
+
+    async fn download_track_with_retry(
+        &self,
+        track_ref: SpotifyId,
+        args: &Args,
+        path_prefix: Option<&Path>,
+        name_prefix: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut tries = 1;
+        while let Err(e) = self
+            .download_track(track_ref, &args, path_prefix, name_prefix)
+            .await
+        {
+            tries += 1;
+            if tries > args.max_tries {
+                log::error!("Reached max retries, aborting");
+                return Err(e);
+            } else {
+                log::warn!("Failed to download {}, retrying: {}", track_ref, e);
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn download(&self, item_ref: SpotifyId, args: Args) {
@@ -443,16 +490,24 @@ impl Loader {
             };
         }
 
-        match item_ref.item_type {
-            SpotifyItemType::Track => self.download_track(item_ref, &args, None, None).await,
+        if let Err(e) = match item_ref.item_type {
+            SpotifyItemType::Track => {
+                self.download_track_with_retry(item_ref, &args, None, None)
+                    .await
+            }
             SpotifyItemType::Album => self.download_album(item_ref, args).await,
             SpotifyItemType::Playlist => self.download_playlist(item_ref, args).await,
-            SpotifyItemType::Episode => self.download_track(item_ref, &args, None, None).await,
+            SpotifyItemType::Episode => {
+                self.download_track_with_retry(item_ref, &args, None, None)
+                    .await
+            }
             SpotifyItemType::Show => self.download_show(item_ref, args).await,
             _ => {
                 log::error!("Unsupported item type: {:?}", item_ref.item_type);
                 std::process::exit(1);
             }
+        } {
+            log::error!("Failed to download: {}", e);
         }
     }
 }
