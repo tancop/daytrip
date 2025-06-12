@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail};
 use std::{
-    borrow::Cow,
     path::Path,
     sync::{
         Arc,
@@ -23,7 +22,7 @@ use librespot::{
         player::{Player, PlayerEvent},
     },
 };
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::OnceCell;
 use regex::Regex;
 use tokio::{
     fs::{File, create_dir_all},
@@ -32,13 +31,10 @@ use tokio::{
 
 use crate::{Args, OutputFormat};
 
-static FEATURE_TAG_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r" ?\((?:feat\.?|ft\.?|with) .+\)").unwrap());
-
 static REGEX_FILTER: OnceCell<Regex> = OnceCell::new();
 
 /// Replace characters illegal in a path on Windows or Linux
-fn legalize_name(name: String) -> String {
+fn legalize_name(name: &str) -> String {
     name.replace(&['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
 }
 
@@ -123,20 +119,6 @@ fn get_bitrate(format: &AudioFileFormat) -> u32 {
     }
 }
 
-fn remove_feature_tag(mut title: String) -> String {
-    if let Some(matched) = FEATURE_TAG_REGEX.find(&title) {
-        title.replace_range(matched.range(), "")
-    }
-    title
-}
-
-/// Format a track number to start with the right amount of zeros
-fn format_track_number(number: usize, total_tracks: usize) -> String {
-    let digits = (total_tracks as f32).log10().ceil() as usize;
-
-    format!("{:0width$}", number, width = digits)
-}
-
 fn get_artists_line(artists: &ArtistsWithRole) -> String {
     artists
         .iter()
@@ -181,6 +163,67 @@ fn get_ffmpeg_command(
     }
 }
 
+struct DownloadInfo {
+    output_file_name: String,
+    input_format: Option<AudioFileFormat>,
+}
+
+async fn get_download_info(
+    template: &str,
+    extension: &str,
+    config: &PlayerConfig,
+    session: &Session,
+    track_ref: SpotifyId,
+    track_number: Option<u32>,
+) -> DownloadInfo {
+    if let Ok(audio_item) = AudioItem::get_file(session, track_ref).await {
+        let input_format = get_input_format(&config, &audio_item);
+        let mut name = match audio_item.unique_fields {
+            UniqueFields::Track { artists, .. } => {
+                // music
+                let title = template
+                    .replace(
+                        "%a",
+                        &artists
+                            .first()
+                            .map(|artist| artist.name.to_owned())
+                            .unwrap_or("".to_owned()),
+                    )
+                    .replace("%A", &get_artists_line(&artists))
+                    .replace("%t", &audio_item.name)
+                    .replace("%n", &format!("{:02}", track_number.unwrap_or(0)));
+
+                format!("{}.{}", title, extension)
+            }
+            UniqueFields::Episode { show_name, .. } => {
+                // podcast
+
+                let title = template
+                    .replace("%a", &show_name)
+                    .replace("%t", &audio_item.name)
+                    .replace("%n", &format!("{:02}", track_number.unwrap_or(0)));
+
+                format!("{}.{}", title, extension)
+            }
+        };
+
+        if let Some(regex) = REGEX_FILTER.get() {
+            name = regex.replace_all(&name, "").into_owned();
+        }
+
+        DownloadInfo {
+            output_file_name: name,
+            input_format,
+        }
+    } else {
+        log::warn!("Failed to get audio item name, falling back to ID");
+        DownloadInfo {
+            output_file_name: format!("{}.{}", track_ref.to_base62().unwrap(), extension),
+            input_format: None,
+        }
+    }
+}
+
 pub struct Loader {
     session: Session,
 }
@@ -195,92 +238,42 @@ impl Loader {
         track_ref: SpotifyId,
         args: &Args,
         path_prefix: Option<&Path>,
-        name_prefix: Option<&str>,
+        track_number: Option<u32>,
     ) -> anyhow::Result<()> {
-        let output_file_name: String;
-
         let extension = get_format_extension(&args.format);
 
         let config = PlayerConfig::default();
 
-        let mut input_format: Option<AudioFileFormat> = None;
+        let info = get_download_info(
+            &args.name_format,
+            extension,
+            &config,
+            &self.session,
+            track_ref.clone(),
+            track_number,
+        )
+        .await;
 
-        if let Ok(audio_item) = AudioItem::get_file(&self.session, track_ref).await {
-            input_format = get_input_format(&config, &audio_item);
-            match audio_item.unique_fields {
-                UniqueFields::Track { artists, .. } => {
-                    // music
-                    let artists_line = get_artists_line(&artists);
+        let input_format = info.input_format;
+        let output_file_name = info.output_file_name;
 
-                    let title = if args.remove_feature_tags {
-                        remove_feature_tag(audio_item.name)
-                    } else {
-                        audio_item.name
-                    };
-
-                    let title = match REGEX_FILTER.get() {
-                        Some(re) => re.replace_all(&title, ""),
-                        None => Cow::from(&title),
-                    };
-
-                    output_file_name = format!(
-                        "{}{} - {}.{}",
-                        name_prefix.unwrap_or(""),
-                        if args.main_artist_only {
-                            artists
-                                .first()
-                                .map(|artist| artist.name.to_owned())
-                                .unwrap_or("".to_owned())
-                        } else {
-                            artists_line
-                        },
-                        title,
-                        extension
-                    );
-                }
-                UniqueFields::Episode { show_name, .. } => {
-                    // podcast
-
-                    let title = if args.remove_feature_tags {
-                        remove_feature_tag(audio_item.name)
-                    } else {
-                        audio_item.name
-                    };
-
-                    let title = match REGEX_FILTER.get() {
-                        Some(re) => re.replace_all(&title, ""),
-                        None => Cow::from(&title),
-                    };
-
-                    output_file_name = format!(
-                        "{}{} - {}.{}",
-                        name_prefix.unwrap_or(""),
-                        show_name,
-                        title,
-                        extension
-                    );
-                }
-            };
-        } else {
-            log::warn!("Failed to get audio item name, falling back to ID");
-            output_file_name = format!("{}.{}", track_ref.to_base62().unwrap(), extension);
-        }
-
-        let search_path = match path_prefix {
-            Some(prefix) => &prefix.join(&output_file_name),
-            None => Path::new(&output_file_name),
+        let output_path = match path_prefix {
+            Some(prefix) => prefix.join(&legalize_name(&output_file_name)),
+            None => legalize_name(&output_file_name).into(),
         };
 
-        if !args.force_download && search_path.exists() {
+        let output_path = if let Some(location) = args.location.clone() {
+            tokio::fs::create_dir_all(&location).await?;
+            location.join(output_path)
+        } else {
+            output_path
+        };
+
+        if !args.force_download && output_path.exists() {
             println!("Skipping {output_file_name}");
             return Ok(());
         }
         println!("Downloading {output_file_name}");
-
-        let output_file_name = match path_prefix {
-            Some(prefix) => prefix.join(&legalize_name(output_file_name)),
-            None => legalize_name(output_file_name).into(),
-        };
 
         let backend = audio_backend::find(Some("pipe".to_owned()))
             .ok_or_else(|| anyhow!("Failed to find audio backend"))?;
@@ -318,7 +311,7 @@ impl Loader {
             bail!("Failed to download track");
         }
 
-        let mut cmd = get_ffmpeg_command(args, input_format, &output_file_name)?;
+        let mut cmd = get_ffmpeg_command(args, input_format, &output_path)?;
 
         cmd.wait().await.context("Failed to wait for ffmpeg")?;
 
@@ -348,27 +341,13 @@ impl Loader {
             .await
             .context("Failed to create playlist folder")?;
 
-        if args.number_tracks {
-            let length = plist.length;
-            let mut idx = 1;
+        let mut idx = 1;
 
-            for track_id in plist.tracks() {
-                self.download_track_with_retry(
-                    track_id.clone(),
-                    &args,
-                    Some(folder),
-                    Some(&format_track_number(idx, length as usize)),
-                )
+        for track_id in plist.tracks() {
+            self.download_track_with_retry(track_id.clone(), &args, Some(folder), Some(idx))
                 .await?;
-                idx += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
-        } else {
-            for track_id in plist.tracks() {
-                self.download_track_with_retry(track_id.clone(), &args, Some(folder), None)
-                    .await?;
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
+            idx += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
         Ok(())
@@ -376,20 +355,13 @@ impl Loader {
 
     pub async fn download_album(&self, playlist_ref: SpotifyId, args: Args) -> anyhow::Result<()> {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
-        let artists = if args.main_artist_only {
-            album
-                .artists
-                .first()
-                .map(|artist| artist.name.to_owned())
-                .unwrap_or("".to_owned())
-        } else {
-            album
-                .artists
-                .iter()
-                .map(|artist| &*artist.name)
-                .collect::<Vec<&str>>()
-                .join(", ")
-        };
+
+        let artists = album
+            .artists
+            .iter()
+            .map(|artist| &*artist.name)
+            .collect::<Vec<&str>>()
+            .join(", ");
 
         let folder_name = format!("{} - {}", artists, album.name);
         let folder = Path::new(&folder_name);
@@ -400,27 +372,13 @@ impl Loader {
 
         println!("Downloading album {} by {}", album.name, artists);
 
-        if args.number_tracks {
-            let length = album.tracks().count();
-            let mut idx = 1;
+        let mut idx = 1;
 
-            for track_id in album.tracks() {
-                self.download_track_with_retry(
-                    track_id.clone(),
-                    &args,
-                    Some(folder),
-                    Some(&format_track_number(idx, length as usize)),
-                )
+        for track_id in album.tracks() {
+            self.download_track_with_retry(track_id.clone(), &args, Some(folder), Some(idx))
                 .await?;
-                idx += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
-        } else {
-            for track_id in album.tracks() {
-                self.download_track_with_retry(track_id.clone(), &args, Some(folder), None)
-                    .await?;
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
+            idx += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
         Ok(())
@@ -436,27 +394,13 @@ impl Loader {
             .await
             .context("Failed to create show folder")?;
 
-        if args.number_tracks {
-            let length = show.episodes.len();
-            let mut idx = 1;
+        let mut idx = 1;
 
-            for episode_id in show.episodes.iter() {
-                self.download_track_with_retry(
-                    episode_id.clone(),
-                    &args,
-                    Some(folder),
-                    Some(&format_track_number(idx, length as usize)),
-                )
+        for episode_id in show.episodes.iter() {
+            self.download_track_with_retry(episode_id.clone(), &args, Some(folder), Some(idx))
                 .await?;
-                idx += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
-        } else {
-            for episode_id in show.episodes.iter() {
-                self.download_track_with_retry(episode_id.clone(), &args, Some(folder), None)
-                    .await?;
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
+            idx += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
         Ok(())
@@ -467,11 +411,11 @@ impl Loader {
         track_ref: SpotifyId,
         args: &Args,
         path_prefix: Option<&Path>,
-        name_prefix: Option<&str>,
+        track_number: Option<u32>,
     ) -> anyhow::Result<()> {
         let mut tries = 1;
         while let Err(e) = self
-            .download_track(track_ref, &args, path_prefix, name_prefix)
+            .download_track(track_ref, &args, path_prefix, track_number)
             .await
         {
             tries += 1;
@@ -487,7 +431,7 @@ impl Loader {
     }
 
     pub async fn download(&self, item_ref: SpotifyId, args: Args) {
-        if let Some(filter) = &args.track_title_filter {
+        if let Some(filter) = &args.cleanup_regex {
             match Regex::new(filter) {
                 Ok(re) => {
                     _ = REGEX_FILTER.try_insert(re).unwrap();

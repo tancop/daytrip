@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, command};
 use download::Loader;
 use librespot::core::{
@@ -25,26 +27,25 @@ struct Args {
     /// Share link or Spotify URI for the downloaded item
     url: String,
 
+    /// Location for downloaded music
+    location: Option<PathBuf>,
+
     /// Output audio format
     #[arg(short, long, value_enum, default_value_t)]
     format: OutputFormat,
 
-    /// Remove tags like `(feat. Artist Name)` from track titles
-    #[arg(short, long, default_value_t = false)]
-    remove_feature_tags: bool,
+    /// Format used for file names. Supports these arguments:
+    /// %a - main artist name
+    /// %A - all artist names separated with commas
+    /// %t - track title
+    /// %n - track number
+    #[arg(short, long, verbatim_doc_comment, default_value = "%a - %t")]
+    name_format: String,
 
-    /// Regular expression used to filter track titles. Any captures
-    /// will be removed
-    #[arg(short, long)]
-    track_title_filter: Option<String>,
-
-    /// Add track number to file names when downloading an album or playlist
-    #[arg(short, long, default_value_t = false)]
-    number_tracks: bool,
-
-    /// Only show main artist on titles if there's more than one
-    #[arg(short, long, default_value_t = false)]
-    main_artist_only: bool,
+    /// Any characters captured by this regex will be removed
+    /// from the file name
+    #[arg(short = 'r', long)]
+    cleanup_regex: Option<String>,
 
     /// Always download tracks even if they already exist
     #[arg(long = "force", default_value_t = false)]

@@ -10,102 +10,86 @@ or proprietary formats. Your music is _yours_ again. Works for both free and pre
 
 ## Warning
 
-Downloading music like this is against Spotify's TOS and might get you banned. If you don't need full premium
-quality you should probably use a free burner account. Bypassing copy protection might be illegal in some
-countries (looking at you America). **You are the only one responsible for any legal issues caused by using Daytrip**.
+Downloading music outside of the built-in premium feature is against Spotify TOS and there is a
+risk of getting banned. If you don't need full premium quality you might want to use a free burner account.
 
 ## Installing
 
-You need [ffmpeg](https://ffmpeg.org/) installed to use this. You should probably download it with a package manager
-like dnf, apt, pacman or winget. If you already have it, download the
+You need [ffmpeg](https://ffmpeg.org/) installed to use this. If you already have it, download the
 [latest release zip](https://github.com/tancop/daytrip/releases/latest) for your system and unpack it where you want.
 
 ## Usage
 
-You can download songs, albums, playlists, podcast episodes or shows using their share link.
-Open the Spotify app or web player, right click on the thing you want to download and select
-`Share > Copy link to [...]`. Then open a terminal in the folder with Daytrip and paste the link like this:
+- Open Spotify on any platform
+- Copy the URL or a share link
+- Download like this (you might need quotes around the link):
 
 ```
-./daytrip "https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr?si=aff53d31ec5b405c"
+daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr
 ```
 
-You might not need quotes around the link on some systems. If this is your first time downloading or the cached
-token is too old, Daytrip opens a browser tab asking you to authenticate with Spotify. The tab closes automatically
-after that. Later downloads will try and use cached credentials to skip the login process.
+By default, Daytrip downloads everything into the folder with its executable. You can change this with a second argument:
+
+```
+daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr C:\Users\me\Music
+```
+
+### Titles
+
+You can customize track titles with the `-n` option:
+
+- default (`-n "%a - %t"`) -> "Playboi Carti - Love Hurts (feat. Travis Scott)"
+- `-n "%A - %t"` -> "Playboi Carti, Travis Scott - Love Hurts (feat. Travis Scott)"
+- `-n "%t by %a"` -> "Love Hurts (feat. Travis Scott) by Playboi Carti"
+- `-n "whoa slatt"` -> "whoa slatt"
+
+When downloading albums you might want to keep the tracks sorted with a number:
+
+- `-n "%n %a - %t"` -> "05 Playboi Carti - Love Hurts (feat. Travis Scott)"
+
+### Title Cleanup
+
+Some track titles come with feature tags or other stuff you don't need. You can clean them up with a regex that captures the part you want to remove:
+
+```
+daytrip https://open.spotify.com/track/39MK3d3fonIP8Mz9oHCTBB -n "%A - %t" -r "( ?\(.*\))"
+```
+
+`Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate (Spider-Man: Across the Spider-Verse)
+(Metro Boomin & Swae Lee, Lil Wayne, Offset)` -> `Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate`
+
+The most useful filters for this are probably ` ?\((?:feat\.?|ft\.?|with) .+\)` to remove some common types of feature tags and `( ?\(.+\))` to aggressively remove everything inside a pair of `( )`. If the regex gets too complicated it might be easier to download tracks one by one with a custom name.
 
 ### Options
 
 ```
-Usage: daytrip [OPTIONS] <URL>
+Usage: daytrip [OPTIONS] <URL> [LOCATION]
 
 Arguments:
-  <URL>  Share link or Spotify URI for the downloaded item
+  <URL>       Share link or Spotify URI for the downloaded item
+  [LOCATION]  Location for downloaded music
 
 Options:
-  -f, --format <FORMAT>
-          Output audio format [default: opus] [possible values: opus, wav, ogg, mp3]
-  -r, --remove-feature-tags
-          Remove tags like `(feat. Artist Name)` from track titles
-  -t, --track-title-filter <TRACK_TITLE_FILTER>
-          Regular expression used to filter track titles. Any captures will be removed
-  -n, --number-tracks
-          Add track number to file names when downloading an album or playlist
-  -m, --main-artist-only
-          Only show main artist on titles if there's more than one
-      --force
-          Always download tracks even if they already exist
-      --max-tries <MAX_TRIES>
-          Maximum number of retries for failed requests [default: 3]
-  -h, --help
-          Print help
-  -V, --version
-          Print version
+  -f, --format <FORMAT>                Output audio format [default: opus] [possible values: opus, wav, ogg, mp3]
+  -n, --name-format <NAME_FORMAT>      Format used for file names. Supports these arguments:
+                                       %a - main artist name
+                                       %A - all artist names separated with commas
+                                       %t - track title
+                                       %n - track number [default: "%a - %t"]
+  -r, --cleanup-regex <CLEANUP_REGEX>  Any characters captured by this regex will be removed from the file name
+      --force                          Always download tracks even if they already exist
+      --max-tries <MAX_TRIES>          Maximum number of retries for failed requests [default: 3]
+  -h, --help                           Print help
+  -V, --version                        Print version
 ```
-
-### Title Cleanup
-
-The `-r` option is useful for cleaning up messy titles with a long feature list:
-
-```
-daytrip https://open.spotify.com/track/4X5f3vT8MRuXF68pfjNte5 -r
-```
-
-- Without filter: `A$AP Rocky, Drake, 2 Chainz, Kendrick Lamar - F**kin' Problems (feat. Drake, 2 Chainz & Kendrick Lamar)`
-- With filter: `A$AP Rocky, Drake, 2 Chainz, Kendrick Lamar - F**kin' Problems`
-
-You might need a custom regex filter with `-t` in more complicated cases, like this one to remove everything inside `( )`:
-
-```
-daytrip https://open.spotify.com/track/39MK3d3fonIP8Mz9oHCTBB -t '( ?\(.+?\))'
-```
-
-- Without filter: `Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate (Spider-Man: Across the Spider-Verse) (Metro Boomin & Swae Lee, Lil Wayne, Offset)`
-- With filter: `Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate`
-
-Or you can do it in reverse with `-m`:
-
-```
-daytrip https://open.spotify.com/track/4X5f3vT8MRuXF68pfjNte5 -m
-```
-
-- `A$AP Rocky - F**kin' Problems (feat. Drake, 2 Chainz & Kendrick Lamar)`
-
-## Downloads
-
-All downloaded music gets saved next to the `daytrip` executable as a `.opus` file with the track name and artists:
-
-```
-Lil Wayne, Cory Gunz - 6 Foot 7 Foot.opus
-```
-
-Albums and playlists download into a folder like `My Playlist` or `Drake - Views`. Podcasts work the same but
-with the show title instead of artist names.
 
 ## Roadmap
 
 - [x] Add option to remove feature tags
-- [ ] Add option to remove everything inside `( )` for cases like https://open.spotify.com/album/1bwbZJ6khPJyVpOaqgKsoZ
+- [x] Add option to remove everything inside `( )` for cases like https://open.spotify.com/album/1bwbZJ6khPJyVpOaqgKsoZ
 - [x] More audio formats (mp3, wav, ogg vorbis)
-- [ ] Downloading album art
-- [ ] Change download folder
+- [ ] Download album art
+- [ ] Add metadata to saved tracks
+- [ ] TOML playlists with custom track names
+- [ ] Save Spotify playlists/albums to file
+- [x] Change download folder
