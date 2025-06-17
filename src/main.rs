@@ -10,8 +10,9 @@ use serde::Serialize;
 
 mod auth;
 mod download;
+mod metadata;
 
-#[derive(clap::ValueEnum, Clone, Default, Debug, Serialize, PartialEq)]
+#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 enum OutputFormat {
     #[default]
@@ -21,18 +22,39 @@ enum OutputFormat {
     Mp3,
 }
 
+impl OutputFormat {
+    fn extension(&self) -> &str {
+        match self {
+            OutputFormat::Opus => "opus",
+            OutputFormat::Mp3 => "mp3",
+            OutputFormat::Ogg => "ogg",
+            OutputFormat::Wav => "wav",
+        }
+    }
+
+    fn from_extension(ext: &str) -> Option<Self> {
+        match ext {
+            "opus" => Some(OutputFormat::Opus),
+            "mp3" => Some(OutputFormat::Mp3),
+            "ogg" => Some(OutputFormat::Ogg),
+            "wav" => Some(OutputFormat::Wav),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Share link or Spotify URI for the downloaded item
     url: String,
 
-    /// Location for downloaded music
-    location: Option<PathBuf>,
+    /// Location for downloaded content
+    output_path: Option<PathBuf>,
 
     /// Output audio format
-    #[arg(short, long, value_enum, default_value_t)]
-    format: OutputFormat,
+    #[arg(short, long, value_enum, default_value = None)]
+    format: Option<OutputFormat>,
 
     /// Format used for file names. Supports these arguments:
     /// %a - main artist name
