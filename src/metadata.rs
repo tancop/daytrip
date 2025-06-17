@@ -1,12 +1,10 @@
 use std::path::Path;
 
+use itertools::Itertools;
 use once_cell::sync::OnceCell;
 
 use librespot::{
-    metadata::{
-        artist::ArtistsWithRole,
-        audio::{AudioFileFormat, AudioItem, UniqueFields},
-    },
+    metadata::audio::{AudioFileFormat, AudioItem, UniqueFields},
     playback::config::{Bitrate, PlayerConfig},
 };
 use regex::Regex;
@@ -63,14 +61,6 @@ pub fn get_input_format(config: &PlayerConfig, audio_item: &AudioItem) -> Option
     }
 }
 
-fn get_artists_line(artists: &ArtistsWithRole) -> String {
-    artists
-        .iter()
-        .map(|artist| &*artist.name)
-        .collect::<Vec<&str>>()
-        .join(", ")
-}
-
 /// Replace characters illegal in a path on Windows or Linux
 fn legalize_name(name: &str) -> String {
     name.replace(&['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
@@ -93,7 +83,7 @@ pub async fn get_file_name(
                         .map(|artist| artist.name.to_owned())
                         .unwrap_or("".to_owned()),
                 )
-                .replace("%A", &get_artists_line(&artists))
+                .replace("%A", &artists.iter().map(|artist| &*artist.name).join(", "))
                 .replace("%t", &legalize_name(&audio_item.name))
                 .replace("%n", &format!("{:02}", track_number.unwrap_or(0)));
 

@@ -2,6 +2,7 @@ use crate::metadata::{
     REGEX_FILTER, get_input_format, try_get_format_from_file_name, try_get_format_from_path,
 };
 use anyhow::{anyhow, bail};
+use itertools::Itertools;
 use std::{
     path::Path,
     sync::{
@@ -15,7 +16,7 @@ use librespot::{
     core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
         Album, Metadata, Playlist, Show,
-        audio::{AudioFileFormat, AudioItem},
+        audio::{AudioFileFormat, AudioItem, UniqueFields},
     },
     playback::{
         audio_backend,
@@ -27,7 +28,7 @@ use librespot::{
 use regex::Regex;
 use tokio::{
     fs::{File, create_dir_all},
-    process::Child,
+    process::{Child, Command},
 };
 
 use crate::{Args, OutputFormat, metadata::get_file_name};
@@ -56,10 +57,21 @@ fn get_bitrate(format: &AudioFileFormat) -> u32 {
     }
 }
 
+pub(crate) trait CommandExt {
+    fn with_metadata(&mut self, name: &str, value: &str) -> &mut Self;
+}
+
+impl CommandExt for Command {
+    fn with_metadata(&mut self, name: &str, value: &str) -> &mut Self {
+        self.arg("-metadata").arg(format!("{}={}", name, value))
+    }
+}
+
 fn get_ffmpeg_command(
     input_format: Option<AudioFileFormat>,
     output_format: OutputFormat,
     output_file_name: &Path,
+    audio_item: &AudioItem,
 ) -> Result<Child, std::io::Error> {
     // Read track as stereo signed 16-bit PCM and encode into audio file
     const COMMON_ARGS: &[&str] = &[
@@ -74,17 +86,43 @@ fn get_ffmpeg_command(
         "-i",
         "temp.pcm",
     ];
+
+    let mut cmd = Command::new("ffmpeg");
+    let cmd = cmd
+        .args(COMMON_ARGS)
+        .with_metadata("title", &audio_item.name)
+        .with_metadata("comment", &audio_item.uri);
+
+    let cmd = match &audio_item.unique_fields {
+        UniqueFields::Episode {
+            show_name,
+            description,
+            ..
+        } => cmd
+            .with_metadata("show", &show_name)
+            .with_metadata("description", &description),
+        UniqueFields::Track {
+            artists,
+            album,
+            album_artists,
+            number,
+            ..
+        } => cmd
+            .with_metadata(
+                "artist",
+                &artists.iter().map(|artist| &*artist.name).join(", "),
+            )
+            .with_metadata("album", &album)
+            .with_metadata("album_artist", &album_artists.iter().join(", "))
+            .with_metadata("track", &number.to_string()),
+    };
+
     if output_format == OutputFormat::Wav || input_format.is_none() {
-        tokio::process::Command::new("ffmpeg")
-            .args(COMMON_ARGS)
-            .arg(output_file_name)
-            .spawn()
+        cmd.arg(output_file_name).spawn()
     } else {
         // Set output bitrate to match downloaded audio
         let bitrate = get_bitrate(&input_format.unwrap());
-        tokio::process::Command::new("ffmpeg")
-            .args(COMMON_ARGS)
-            .arg("-b:a")
+        cmd.arg("-b:a")
             // Convert bitrate to bps
             .arg((bitrate * 1000).to_string())
             .arg(output_file_name)
@@ -157,7 +195,7 @@ impl Loader {
             bail!("Failed to download track");
         }
 
-        let mut cmd = get_ffmpeg_command(input_format, output_format, &output_path)?;
+        let mut cmd = get_ffmpeg_command(input_format, output_format, &output_path, &audio_item)?;
 
         cmd.wait().await.context("Failed to wait for ffmpeg")?;
 

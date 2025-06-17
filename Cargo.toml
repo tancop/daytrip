@@ -8,6 +8,7 @@ anyhow = "1.0.98"
 clap = { version = "4.5.39", features = ["derive"] }
 env_logger = "0.11.8"
 futures-util = "0.3.31"
+itertools = "0.14.0"
 librespot = "0.6.0-dev"
 librespot-oauth = "0.6.0-dev"
 log = "0.4.27"
