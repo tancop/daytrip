@@ -94,7 +94,7 @@ pub async fn get_file_name(
                         .unwrap_or("".to_owned()),
                 )
                 .replace("%A", &get_artists_line(&artists))
-                .replace("%t", &audio_item.name)
+                .replace("%t", &legalize_name(&audio_item.name))
                 .replace("%n", &format!("{:02}", track_number.unwrap_or(0)));
 
             match extension {
@@ -107,7 +107,7 @@ pub async fn get_file_name(
 
             let title = template
                 .replace("%a", &show_name)
-                .replace("%t", &audio_item.name)
+                .replace("%t", &legalize_name(&audio_item.name))
                 .replace("%n", &format!("{:02}", track_number.unwrap_or(0)));
 
             match extension {
@@ -118,9 +118,9 @@ pub async fn get_file_name(
     };
 
     if let Some(regex) = REGEX_FILTER.get() {
-        legalize_name(&regex.replace_all(&name, "").into_owned())
+        regex.replace_all(&name, "").into_owned()
     } else {
-        legalize_name(&name)
+        name
     }
 }
 

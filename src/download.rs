@@ -116,6 +116,9 @@ impl Loader {
             println!("Skipping {}", output_path.to_string_lossy());
             return Ok(());
         }
+        if let Some(parent) = output_path.parent() {
+            create_dir_all(parent).await?;
+        }
         println!("Downloading {}", output_path.to_string_lossy());
 
         let backend = audio_backend::find(Some("pipe".to_owned()))
