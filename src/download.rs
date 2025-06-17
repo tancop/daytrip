@@ -215,13 +215,22 @@ impl Loader {
                 Err(e) => bail!("Failed to get audio item: {e}"),
             };
 
-            let output_format = match output_format {
-                Some(fmt) => fmt,
-                None => try_get_format_from_file_name(name_template).unwrap_or(OutputFormat::Opus),
-            };
+            let output_format = output_format
+                .or_else(|| try_get_format_from_file_name(name_template))
+                .unwrap_or(OutputFormat::Opus);
             let extension = output_format.extension();
 
-            let name = get_file_name(&item, name_template, Some(idx), Some(&extension)).await;
+            let name = get_file_name(
+                &item,
+                name_template,
+                Some(idx),
+                if name_template.ends_with(&(".".to_owned() + extension)) {
+                    None
+                } else {
+                    Some(&extension)
+                },
+            )
+            .await;
 
             self.download_track_with_retry(
                 &item,
@@ -326,10 +335,10 @@ impl Loader {
             Err(e) => bail!("Failed to get audio item: {e}"),
         };
 
-        let output_format = match output_format {
-            Some(fmt) => fmt,
-            None => try_get_format_from_path(path).unwrap_or(OutputFormat::Opus),
-        };
+        let output_format = output_format
+            .or_else(|| try_get_format_from_path(path))
+            .or_else(|| try_get_format_from_file_name(name_template))
+            .unwrap_or(OutputFormat::Opus);
 
         match path {
             Some(path) => {
@@ -344,7 +353,17 @@ impl Loader {
             }
             None => {
                 let extension = output_format.extension();
-                let name = get_file_name(&item, name_template, None, Some(&extension)).await;
+                let name = get_file_name(
+                    &item,
+                    name_template,
+                    None,
+                    if name_template.ends_with(&(".".to_owned() + extension)) {
+                        None
+                    } else {
+                        Some(&extension)
+                    },
+                )
+                .await;
                 self.download_track_with_retry(
                     &item,
                     Path::new(&name),
