@@ -400,7 +400,7 @@ impl Loader {
                     path,
                     args.format,
                     &args.name_format,
-                    false,
+                    args.force_download,
                     args.max_tries,
                 )
                 .await
@@ -413,7 +413,7 @@ impl Loader {
                     path,
                     args.format,
                     &args.name_format,
-                    false,
+                    args.force_download,
                     args.max_tries,
                 )
                 .await
