@@ -1,47 +1,26 @@
-use std::path::PathBuf;
+use std::{
+    fs::File,
+    io::{BufReader, Read},
+    path::{Path, PathBuf},
+};
 
 use clap::{Parser, command};
 use download::Loader;
-use librespot::core::{
-    Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind, spotify_id::SpotifyItemType,
+use librespot::{
+    core::{
+        Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind,
+        spotify_id::SpotifyItemType,
+    },
+    metadata::audio::AudioItem,
 };
 use regex::Regex;
-use serde::Serialize;
+
+use crate::{download::OutputFormat, metadata::get_file_name, playlist::Playlist};
 
 mod auth;
 mod download;
 mod metadata;
-
-#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-enum OutputFormat {
-    #[default]
-    Opus,
-    Wav,
-    Ogg,
-    Mp3,
-}
-
-impl OutputFormat {
-    fn extension(&self) -> &str {
-        match self {
-            OutputFormat::Opus => "opus",
-            OutputFormat::Mp3 => "mp3",
-            OutputFormat::Ogg => "ogg",
-            OutputFormat::Wav => "wav",
-        }
-    }
-
-    fn from_extension(ext: &str) -> Option<Self> {
-        match ext {
-            "opus" => Some(OutputFormat::Opus),
-            "mp3" => Some(OutputFormat::Mp3),
-            "ogg" => Some(OutputFormat::Ogg),
-            "wav" => Some(OutputFormat::Wav),
-            _ => None,
-        }
-    }
-}
+mod playlist;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -93,7 +72,7 @@ fn parse_item_type(item_type: &str) -> SpotifyItemType {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
 
@@ -126,33 +105,6 @@ async fn main() {
         }
     };
 
-    let item_ref = if args.url.starts_with("spotify:") {
-        let Ok(item_ref) = SpotifyId::from_base62(&args.url) else {
-            log::error!("Invalid Spotify ID: {}", &args.url);
-            std::process::exit(1);
-        };
-        item_ref
-    } else {
-        let re = Regex::new(r"spotify\.com/(\w+)/(\w+)").unwrap();
-        if let Some(res) = re.captures(&args.url) {
-            let item_type = &res[1];
-            let id = &res[2];
-            let Ok(mut item_ref) = SpotifyId::from_base62(id) else {
-                log::error!("Invalid Spotify ID: {}", id);
-                std::process::exit(1);
-            };
-            item_ref.item_type = parse_item_type(item_type);
-            item_ref
-        } else {
-            let Ok(mut item_ref) = SpotifyId::from_base62(&args.url) else {
-                log::error!("Invalid Spotify ID: {}", &args.url);
-                std::process::exit(1);
-            };
-            item_ref.item_type = SpotifyItemType::Track;
-            item_ref
-        }
-    };
-
     let session = Session::new(SessionConfig::default(), Some(cache));
 
     match session.connect(credentials, true).await {
@@ -180,9 +132,89 @@ async fn main() {
 
     let loader = Loader::new(session);
 
-    loader.download(item_ref, args).await;
+    let path = Path::new(&args.url);
 
-    let _ = tokio::fs::remove_file("temp.pcm").await;
+    match File::open(path) {
+        Ok(mut file) => {
+            let mut buf = String::new();
+            file.read_to_string(&mut buf)?;
+            let plist: Playlist = toml::from_str(&buf)?;
+
+            let folder_path = match args.output_path {
+                Some(path) => path,
+                None => PathBuf::from(&plist.title),
+            };
+
+            let format = args.format.unwrap_or(OutputFormat::Opus);
+            let extension = format.extension();
+
+            let mut idx = 1;
+
+            for track in &plist.tracks {
+                if let Ok(id) = track.id() {
+                    let audio_item = loader.get_audio_item(id).await?;
+
+                    let file_name = match track.name() {
+                        Some(name) => name.to_owned() + "." + extension,
+                        None => {
+                            get_file_name(
+                                &audio_item,
+                                &args.name_format,
+                                Some(idx),
+                                Some(extension),
+                            )
+                            .await
+                        }
+                    };
+
+                    loader
+                        .download_track_with_retry(
+                            &audio_item,
+                            folder_path.join(&file_name).as_path(),
+                            format,
+                            args.force_download,
+                            args.max_tries,
+                        )
+                        .await?;
+                }
+
+                idx += 1;
+            }
+        }
+        Err(_) => {
+            let item_ref = if args.url.starts_with("spotify:") {
+                let Ok(item_ref) = SpotifyId::from_base62(&args.url) else {
+                    log::error!("Invalid Spotify ID: {}", &args.url);
+                    std::process::exit(1);
+                };
+                item_ref
+            } else {
+                let re = Regex::new(r"spotify\.com/(\w+)/(\w+)").unwrap();
+                if let Some(res) = re.captures(&args.url) {
+                    let item_type = &res[1];
+                    let id = &res[2];
+                    let Ok(mut item_ref) = SpotifyId::from_base62(id) else {
+                        log::error!("Invalid Spotify ID: {}", id);
+                        std::process::exit(1);
+                    };
+                    item_ref.item_type = parse_item_type(item_type);
+                    item_ref
+                } else {
+                    let Ok(mut item_ref) = SpotifyId::from_base62(&args.url) else {
+                        log::error!("Invalid Spotify ID: {}", &args.url);
+                        std::process::exit(1);
+                    };
+                    item_ref.item_type = SpotifyItemType::Track;
+                    item_ref
+                }
+            };
+            loader.download(item_ref, args).await;
+        }
+    };
+
+    tokio::fs::remove_file("temp.pcm").await?;
 
     println!("All set!");
+
+    Ok(())
 }

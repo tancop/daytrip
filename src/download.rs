@@ -3,6 +3,7 @@ use crate::metadata::{
 };
 use anyhow::{anyhow, bail};
 use itertools::Itertools;
+use serde::Serialize;
 use std::{
     path::Path,
     sync::{
@@ -13,7 +14,7 @@ use std::{
 
 use anyhow::Context;
 use librespot::{
-    core::{Session, SpotifyId, spotify_id::SpotifyItemType},
+    core::{Error as SpotifyError, Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
         Album, Metadata, Playlist, Show,
         audio::{AudioFileFormat, AudioItem, UniqueFields},
@@ -31,7 +32,38 @@ use tokio::{
     process::{Child, Command},
 };
 
-use crate::{Args, OutputFormat, metadata::get_file_name};
+use crate::{Args, metadata::get_file_name};
+
+#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputFormat {
+    #[default]
+    Opus,
+    Wav,
+    Ogg,
+    Mp3,
+}
+
+impl OutputFormat {
+    pub fn extension(&self) -> &str {
+        match self {
+            OutputFormat::Opus => "opus",
+            OutputFormat::Mp3 => "mp3",
+            OutputFormat::Ogg => "ogg",
+            OutputFormat::Wav => "wav",
+        }
+    }
+
+    pub fn from_extension(ext: &str) -> Option<Self> {
+        match ext {
+            "opus" => Some(OutputFormat::Opus),
+            "mp3" => Some(OutputFormat::Mp3),
+            "ogg" => Some(OutputFormat::Ogg),
+            "wav" => Some(OutputFormat::Wav),
+            _ => None,
+        }
+    }
+}
 
 fn get_bitrate(format: &AudioFileFormat) -> u32 {
     match format {
@@ -210,7 +242,7 @@ impl Loader {
         Ok(())
     }
 
-    async fn download_track_with_retry(
+    pub async fn download_track_with_retry(
         &self,
         audio_item: &AudioItem,
         output_path: &Path,
@@ -464,5 +496,9 @@ impl Loader {
         } {
             log::error!("Failed to download: {}", e);
         }
+    }
+
+    pub async fn get_audio_item(&self, id: SpotifyId) -> Result<AudioItem, SpotifyError> {
+        AudioItem::get_file(&self.session, id).await
     }
 }
