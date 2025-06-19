@@ -1,17 +1,13 @@
 use std::{
     fs::File,
-    io::{BufReader, Read},
+    io::Read,
     path::{Path, PathBuf},
 };
 
 use clap::{Parser, command};
 use download::Loader;
-use librespot::{
-    core::{
-        Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind,
-        spotify_id::SpotifyItemType,
-    },
-    metadata::audio::AudioItem,
+use librespot::core::{
+    Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind, spotify_id::SpotifyItemType,
 };
 use regex::Regex;
 
