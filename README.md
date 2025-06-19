@@ -28,10 +28,11 @@ You need [ffmpeg](https://ffmpeg.org/) installed to use this. If you already hav
 daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr
 ```
 
-By default, Daytrip downloads everything into the folder with its executable. You can change this with a second argument:
+By default, Daytrip downloads everything as `.opus` into the folder with its executable. You can change this with a second argument:
 
 ```
 daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr C:\Users\me\Music
+daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr song.mp3
 ```
 
 ### Titles
@@ -46,6 +47,24 @@ You can customize track titles with the `-n` option:
 When downloading albums you might want to keep the tracks sorted with a number:
 
 - `-n "%n %a - %t"` -> "05 Playboi Carti - Love Hurts (feat. Travis Scott)"
+
+### Saved Playlists
+
+You can load playlists from a TOML file instead of Spotify:
+
+```
+daytrip playlist.toml
+```
+
+```toml
+# playlist.toml
+title = "My Playlist"
+tracks = [
+    "spotify:track:1xzBco0xcoJEDXktl7Jxrr",
+    "spotify:track:39MK3d3fonIP8Mz9oHCTBB",
+    { id = "spotify:track:2JvzF1RMd7lE3KmFlsyZD8", name = "Middle Child" },
+]
+```
 
 ### Title Cleanup
 
@@ -89,7 +108,7 @@ Options:
 - [x] Add option to remove everything inside `( )` for cases like https://open.spotify.com/album/1bwbZJ6khPJyVpOaqgKsoZ
 - [x] More audio formats (mp3, wav, ogg vorbis)
 - [ ] Download album art
-- [ ] Add metadata to saved tracks
-- [ ] TOML playlists with custom track names
+- [x] Add metadata to saved tracks
+- [x] TOML playlists with custom track names
 - [ ] Save Spotify playlists/albums to file
 - [x] Change download folder
