@@ -5,7 +5,7 @@ use anyhow::{anyhow, bail};
 use itertools::Itertools;
 use serde::Serialize;
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -325,16 +325,15 @@ impl Loader {
         let plist = Playlist::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading playlist {}", plist.name());
 
-        let name = plist.name();
-        let folder = Path::new(&name);
+        let folder = args.output_path.unwrap_or(PathBuf::from(plist.name()));
 
-        create_dir_all(folder)
+        create_dir_all(&folder)
             .await
             .context("Failed to create playlist folder")?;
 
         self.download_tracks(
             plist.tracks(),
-            folder,
+            &folder,
             args.format,
             &args.name_format,
             args.force_download,
@@ -353,10 +352,11 @@ impl Loader {
             .collect::<Vec<&str>>()
             .join(", ");
 
-        let folder_name = format!("{} - {}", artists, album.name);
-        let folder = Path::new(&folder_name);
+        let folder = args
+            .output_path
+            .unwrap_or(PathBuf::from(format!("{} - {}", artists, album.name)));
 
-        create_dir_all(folder)
+        create_dir_all(&folder)
             .await
             .context("Failed to create album folder")?;
 
@@ -364,7 +364,7 @@ impl Loader {
 
         self.download_tracks(
             album.tracks(),
-            folder,
+            &folder,
             args.format,
             &args.name_format,
             args.force_download,
@@ -377,15 +377,15 @@ impl Loader {
         let show = Show::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading show {} by {}", show.name, show.publisher);
 
-        let folder = Path::new(&show.name);
+        let folder = args.output_path.unwrap_or(PathBuf::from(&show.name));
 
-        create_dir_all(folder)
+        create_dir_all(&folder)
             .await
             .context("Failed to create show folder")?;
 
         self.download_tracks(
             show.episodes.iter(),
-            folder,
+            &folder,
             args.format,
             &args.name_format,
             args.force_download,
