@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::bail;
 use clap::{Parser, command};
 use download::Loader;
 use librespot::core::{
@@ -72,17 +73,18 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
 
-    let cache = Cache::new(
+    let cache = match Cache::new(
         Some("./daytrip-cache"),
         Some("./daytrip-cache"),
         Some("./daytrip-cache/audio"),
-        // Cache is useful for streaming but we're downloading anyway
+        // Audio cache is useful for streaming but we're downloading anyway, set limit to 0B
         Some(0),
-    )
-    .unwrap_or_else(|e| {
-        log::error!("Failed to open cache: {e}");
-        std::process::exit(1);
-    });
+    ) {
+        Ok(cache) => cache,
+        Err(e) => {
+            bail!("Failed to open cache: {e}");
+        }
+    };
 
     let credentials = match cache.credentials() {
         Some(credentials) => {
@@ -93,8 +95,7 @@ async fn main() -> anyhow::Result<()> {
             let credentials = match auth::get_credentials() {
                 Ok(credentials) => credentials,
                 Err(e) => {
-                    log::error!("Error getting credentials from Spotify: {e}");
-                    std::process::exit(1);
+                    bail!("Error getting credentials from Spotify: {e}");
                 }
             };
             credentials
@@ -111,17 +112,14 @@ async fn main() -> anyhow::Result<()> {
                 let credentials = match auth::get_credentials() {
                     Ok(credentials) => credentials,
                     Err(e) => {
-                        log::error!("Error getting credentials from Spotify: {e}");
-                        std::process::exit(1);
+                        bail!("Error getting credentials from Spotify: {e}");
                     }
                 };
                 if let Err(e) = session.connect(credentials, true).await {
-                    log::error!("Failed to connect to Spotify: {e}");
-                    std::process::exit(1);
+                    bail!("Failed to connect to Spotify: {e}");
                 }
             } else {
-                log::error!("Failed to connect to Spotify: {e}");
-                std::process::exit(1);
+                bail!("Failed to connect to Spotify: {e}");
             }
         }
     }
@@ -180,8 +178,7 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => {
             let item_ref = if args.url.starts_with("spotify:") {
                 let Ok(item_ref) = SpotifyId::from_base62(&args.url) else {
-                    log::error!("Invalid Spotify ID: {}", &args.url);
-                    std::process::exit(1);
+                    bail!("Invalid Spotify ID: {}", &args.url);
                 };
                 item_ref
             } else {
@@ -190,15 +187,13 @@ async fn main() -> anyhow::Result<()> {
                     let item_type = &res[1];
                     let id = &res[2];
                     let Ok(mut item_ref) = SpotifyId::from_base62(id) else {
-                        log::error!("Invalid Spotify ID: {}", id);
-                        std::process::exit(1);
+                        bail!("Invalid Spotify ID: {}", id);
                     };
                     item_ref.item_type = parse_item_type(item_type);
                     item_ref
                 } else {
                     let Ok(mut item_ref) = SpotifyId::from_base62(&args.url) else {
-                        log::error!("Invalid Spotify ID: {}", &args.url);
-                        std::process::exit(1);
+                        bail!("Invalid Spotify ID: {}", &args.url);
                     };
                     item_ref.item_type = SpotifyItemType::Track;
                     item_ref
