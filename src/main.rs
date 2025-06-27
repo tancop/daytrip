@@ -1,20 +1,24 @@
 use std::{
     fs::File,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
 use anyhow::bail;
 use clap::{Parser, Subcommand, command};
-use librespot::core::{
-    Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind, spotify_id::SpotifyItemType,
+use librespot::{
+    core::{
+        Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind,
+        spotify_id::SpotifyItemType,
+    },
+    metadata::{Album, Metadata, Playlist, Show, audio::AudioItem},
 };
 use regex::Regex;
 
 use crate::{
     core::{Loader, OutputFormat},
     metadata::get_file_name,
-    playlist::Playlist,
+    playlist::{SavedPlaylist, SavedTrack},
 };
 
 mod auth;
@@ -81,7 +85,9 @@ struct SaveArgs {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Download an item from Spotify
     Get(DownloadArgs),
+    /// Save an item to a TOML playlist
     Save(SaveArgs),
 }
 
@@ -161,8 +167,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Get(cmd) => {
             download(&loader, cmd).await?;
         }
-        Commands::Save(_) => {
-            todo!("Implement save command")
+        Commands::Save(cmd) => {
+            save_to_file(&loader, cmd).await?;
         }
     }
 
@@ -177,7 +183,7 @@ async fn download(loader: &Loader, cmd: DownloadArgs) -> anyhow::Result<()> {
         Ok(mut file) => {
             let mut buf = String::new();
             file.read_to_string(&mut buf)?;
-            let plist: Playlist = toml::from_str(&buf)?;
+            let plist: SavedPlaylist = toml::from_str(&buf)?;
 
             let folder_path = match cmd.common_args.output_path {
                 Some(path) => path,
@@ -191,7 +197,8 @@ async fn download(loader: &Loader, cmd: DownloadArgs) -> anyhow::Result<()> {
 
             for track in &plist.tracks {
                 if let Ok(id) = track.id() {
-                    let audio_item = loader.get_audio_item(id).await?;
+                    let session = loader.get_session();
+                    let audio_item = AudioItem::get_file(session, id).await?;
 
                     let file_name = match track.name() {
                         Some(name) => name.to_owned() + "." + extension,
@@ -244,6 +251,113 @@ async fn download(loader: &Loader, cmd: DownloadArgs) -> anyhow::Result<()> {
     };
 
     tokio::fs::remove_file("temp.pcm").await?;
+
+    Ok(())
+}
+
+async fn save_to_file(loader: &Loader, cmd: SaveArgs) -> anyhow::Result<()> {
+    let item_ref = if cmd.common_args.url.starts_with("spotify:") {
+        let Ok(item_ref) = SpotifyId::from_base62(&cmd.common_args.url) else {
+            bail!("Invalid Spotify ID: {}", &cmd.common_args.url);
+        };
+        item_ref
+    } else {
+        let re = Regex::new(r"spotify\.com/(\w+)/(\w+)").unwrap();
+        if let Some(res) = re.captures(&cmd.common_args.url) {
+            let item_type = &res[1];
+            let id = &res[2];
+            let Ok(mut item_ref) = SpotifyId::from_base62(id) else {
+                bail!("Invalid Spotify ID: {}", id);
+            };
+            item_ref.item_type = parse_item_type(item_type);
+            item_ref
+        } else {
+            let Ok(mut item_ref) = SpotifyId::from_base62(&cmd.common_args.url) else {
+                bail!("Invalid Spotify ID: {}", &cmd.common_args.url);
+            };
+            item_ref.item_type = SpotifyItemType::Track;
+            item_ref
+        }
+    };
+
+    let title: String;
+
+    let tracks = match item_ref.item_type {
+        SpotifyItemType::Album => {
+            let session = loader.get_session();
+            let plist = Album::get(session, &item_ref).await?;
+            title = cmd.name.unwrap_or(plist.name.to_owned());
+            plist
+                .tracks()
+                .filter_map(|id| match id.to_uri() {
+                    Ok(id) => Some(SavedTrack::Id(id)),
+                    Err(err) => {
+                        log::error!("Failed to get track URI: {}", err);
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        }
+        SpotifyItemType::Episode => {
+            let session = loader.get_session();
+            let audio_item = AudioItem::get_file(session, item_ref).await?;
+            title = cmd.name.unwrap_or(audio_item.name);
+            vec![SavedTrack::Id(audio_item.uri)]
+        }
+        SpotifyItemType::Playlist => {
+            let session = loader.get_session();
+            let plist = Playlist::get(session, &item_ref).await?;
+            title = cmd.name.unwrap_or(plist.name().to_owned());
+            plist
+                .tracks()
+                .filter_map(|id| match id.to_uri() {
+                    Ok(id) => Some(SavedTrack::Id(id)),
+                    Err(err) => {
+                        log::error!("Failed to get track URI: {}", err);
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        }
+        SpotifyItemType::Show => {
+            let session = loader.get_session();
+            let plist = Show::get(session, &item_ref).await?;
+            title = cmd.name.unwrap_or(plist.name.to_owned());
+            plist
+                .episodes
+                .iter()
+                .filter_map(|id| match id.to_uri() {
+                    Ok(id) => Some(SavedTrack::Id(id)),
+                    Err(err) => {
+                        log::error!("Failed to get track URI: {}", err);
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        }
+        SpotifyItemType::Track => {
+            let session = loader.get_session();
+            let audio_item = AudioItem::get_file(session, item_ref).await?;
+            title = cmd.name.unwrap_or(audio_item.name);
+            vec![SavedTrack::Id(audio_item.uri)]
+        }
+        _ => bail!("Unsupported item type: {:?}", item_ref.item_type),
+    };
+
+    let mut file = File::create(
+        cmd.common_args
+            .output_path
+            .unwrap_or(PathBuf::from(&format!(
+                "{}.toml",
+                &metadata::legalize_name(&title)
+            ))),
+    )?;
+
+    let plist = SavedPlaylist { title, tracks };
+
+    let serialized = toml::to_string_pretty(&plist)?;
+
+    file.write(serialized.as_bytes())?;
 
     Ok(())
 }

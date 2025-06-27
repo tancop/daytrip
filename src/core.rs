@@ -17,7 +17,7 @@ use std::{
 
 use anyhow::Context;
 use librespot::{
-    core::{Error as SpotifyError, Session, SpotifyId, spotify_id::SpotifyItemType},
+    core::{Session, SpotifyId, spotify_id::SpotifyItemType},
     metadata::{
         Album, Metadata, Playlist, Show,
         audio::{AudioFileFormat, AudioItem, UniqueFields},
@@ -517,7 +517,7 @@ impl Loader {
         }
     }
 
-    pub async fn get_audio_item(&self, id: SpotifyId) -> Result<AudioItem, SpotifyError> {
-        AudioItem::get_file(&self.session, id).await
+    pub fn get_session(&self) -> &Session {
+        &self.session
     }
 }

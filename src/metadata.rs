@@ -62,7 +62,7 @@ pub fn get_input_format(config: &PlayerConfig, audio_item: &AudioItem) -> Option
 }
 
 /// Replace characters illegal in a path on Windows or Linux
-fn legalize_name(name: &str) -> String {
+pub(crate) fn legalize_name(name: &str) -> String {
     name.replace(&['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
 }
 

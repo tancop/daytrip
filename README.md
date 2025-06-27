@@ -25,14 +25,14 @@ You need [ffmpeg](https://ffmpeg.org/) installed to use this. If you already hav
 - Download like this (you might need quotes around the link):
 
 ```
-daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr
+daytrip get https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr
 ```
 
 By default, Daytrip downloads everything as `.opus` into the folder with its executable. You can change this with a second argument:
 
 ```
-daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr C:\Users\me\Music
-daytrip https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr song.mp3
+daytrip get https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr C:\Users\me\Music
+daytrip get https://open.spotify.com/track/1xzBco0xcoJEDXktl7Jxrr song.mp3
 ```
 
 ### Titles
@@ -50,10 +50,10 @@ When downloading albums you might want to keep the tracks sorted with a number:
 
 ### Saved Playlists
 
-You can load playlists from a TOML file instead of Spotify:
+You can load playlists from a TOML file instead of Spotify. This lets you customize the track list and file names:
 
 ```
-daytrip playlist.toml
+daytrip get playlist.toml
 ```
 
 ```toml
@@ -66,41 +66,24 @@ tracks = [
 ]
 ```
 
+These can be manually created or exported from a Spotify URL:
+
+```
+daytrip save https://open.spotify.com/album/54Y471E7GNBSOXjZtqONId dbr.toml
+```
+
 ### Title Cleanup
 
 Some track titles come with feature tags or other stuff you don't need. You can clean them up with a regex that captures the part you want to remove:
 
 ```
-daytrip https://open.spotify.com/track/39MK3d3fonIP8Mz9oHCTBB -n "%A - %t" -r "( ?\(.*\))"
+daytrip get https://open.spotify.com/track/39MK3d3fonIP8Mz9oHCTBB -n "%A - %t" -r "( ?\(.*\))"
 ```
 
 `Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate (Spider-Man: Across the Spider-Verse)
 (Metro Boomin & Swae Lee, Lil Wayne, Offset)` -> `Metro Boomin, Swae Lee, Lil Wayne, Offset - Annihilate`
 
-The most useful filters for this are probably ` ?\((?:feat\.?|ft\.?|with) .+\)` to remove some common types of feature tags and `( ?\(.+\))` to aggressively remove everything inside a pair of `( )`. If the regex gets too complicated it might be easier to download tracks one by one with a custom name.
-
-### Options
-
-```
-Usage: daytrip [OPTIONS] <URL> [LOCATION]
-
-Arguments:
-  <URL>       Share link or Spotify URI for the downloaded item
-  [LOCATION]  Location for downloaded music
-
-Options:
-  -f, --format <FORMAT>                Output audio format [default: opus] [possible values: opus, wav, ogg, mp3]
-  -n, --name-format <NAME_FORMAT>      Format used for file names. Supports these arguments:
-                                       %a - main artist name
-                                       %A - all artist names separated with commas
-                                       %t - track title
-                                       %n - track number [default: "%a - %t"]
-  -r, --cleanup-regex <CLEANUP_REGEX>  Any characters captured by this regex will be removed from the file name
-      --force                          Always download tracks even if they already exist
-      --max-tries <MAX_TRIES>          Maximum number of retries for failed requests [default: 3]
-  -h, --help                           Print help
-  -V, --version                        Print version
-```
+The most useful filters for this are probably ` ?\((?:feat\.?|ft\.?|with) .+\)` to remove most feature tags and `( ?\(.+\))` to aggressively remove everything inside a pair of `( )`. If the regex gets too complicated it might be easier to save your playlist to a file and change the names one by one.
 
 ## Roadmap
 
@@ -110,5 +93,5 @@ Options:
 - [ ] Download album art
 - [x] Add metadata to saved tracks
 - [x] TOML playlists with custom track names
-- [ ] Save Spotify playlists/albums to file
+- [x] Save Spotify playlists/albums to file
 - [x] Change download folder
