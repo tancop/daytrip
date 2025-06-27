@@ -5,28 +5,43 @@ use std::{
 };
 
 use anyhow::bail;
-use clap::{Parser, command};
-use download::Loader;
+use clap::{Parser, Subcommand, command};
 use librespot::core::{
     Session, SessionConfig, SpotifyId, cache::Cache, error::ErrorKind, spotify_id::SpotifyItemType,
 };
 use regex::Regex;
 
-use crate::{download::OutputFormat, metadata::get_file_name, playlist::Playlist};
+use crate::{
+    core::{Loader, OutputFormat},
+    metadata::get_file_name,
+    playlist::Playlist,
+};
 
 mod auth;
-mod download;
+mod core;
 mod metadata;
 mod playlist;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(version, about, long_about = None)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Parser)]
+struct CommonArgs {
     /// Share link or Spotify URI for the downloaded item
     url: String,
 
     /// Location for downloaded content
     output_path: Option<PathBuf>,
+}
+
+#[derive(Parser)]
+struct DownloadArgs {
+    #[clap(flatten)]
+    common_args: CommonArgs,
 
     /// Output audio format
     #[arg(short, long, value_enum, default_value = None)]
@@ -54,6 +69,22 @@ struct Args {
     max_tries: u32,
 }
 
+#[derive(Parser)]
+struct SaveArgs {
+    #[clap(flatten)]
+    common_args: CommonArgs,
+
+    /// Saved playlist name
+    #[arg(short, long)]
+    name: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Get(DownloadArgs),
+    Save(SaveArgs),
+}
+
 fn parse_item_type(item_type: &str) -> SpotifyItemType {
     match item_type {
         "track" => SpotifyItemType::Track,
@@ -71,7 +102,7 @@ fn parse_item_type(item_type: &str) -> SpotifyItemType {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
-    let args = Args::parse();
+    let args = Cli::parse();
 
     let cache = match Cache::new(
         Some("./daytrip-cache"),
@@ -126,20 +157,34 @@ async fn main() -> anyhow::Result<()> {
 
     let loader = Loader::new(session);
 
-    let path = Path::new(&args.url);
+    match args.command {
+        Commands::Get(cmd) => {
+            download(&loader, cmd).await?;
+        }
+        Commands::Save(_) => {
+            todo!("Implement save command")
+        }
+    }
 
+    println!("All set!");
+
+    Ok(())
+}
+
+async fn download(loader: &Loader, cmd: DownloadArgs) -> anyhow::Result<()> {
+    let path = Path::new(&cmd.common_args.url);
     match File::open(path) {
         Ok(mut file) => {
             let mut buf = String::new();
             file.read_to_string(&mut buf)?;
             let plist: Playlist = toml::from_str(&buf)?;
 
-            let folder_path = match args.output_path {
+            let folder_path = match cmd.common_args.output_path {
                 Some(path) => path,
                 None => PathBuf::from(&plist.title),
             };
 
-            let format = args.format.unwrap_or(OutputFormat::Opus);
+            let format = cmd.format.unwrap_or(OutputFormat::Opus);
             let extension = format.extension();
 
             let mut idx = 1;
@@ -151,13 +196,8 @@ async fn main() -> anyhow::Result<()> {
                     let file_name = match track.name() {
                         Some(name) => name.to_owned() + "." + extension,
                         None => {
-                            get_file_name(
-                                &audio_item,
-                                &args.name_format,
-                                Some(idx),
-                                Some(extension),
-                            )
-                            .await
+                            get_file_name(&audio_item, &cmd.name_format, Some(idx), Some(extension))
+                                .await
                         }
                     };
 
@@ -166,8 +206,8 @@ async fn main() -> anyhow::Result<()> {
                             &audio_item,
                             folder_path.join(&file_name).as_path(),
                             format,
-                            args.force_download,
-                            args.max_tries,
+                            cmd.force_download,
+                            cmd.max_tries,
                         )
                         .await?;
                 }
@@ -176,14 +216,14 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Err(_) => {
-            let item_ref = if args.url.starts_with("spotify:") {
-                let Ok(item_ref) = SpotifyId::from_base62(&args.url) else {
-                    bail!("Invalid Spotify ID: {}", &args.url);
+            let item_ref = if cmd.common_args.url.starts_with("spotify:") {
+                let Ok(item_ref) = SpotifyId::from_base62(&cmd.common_args.url) else {
+                    bail!("Invalid Spotify ID: {}", &cmd.common_args.url);
                 };
                 item_ref
             } else {
                 let re = Regex::new(r"spotify\.com/(\w+)/(\w+)").unwrap();
-                if let Some(res) = re.captures(&args.url) {
+                if let Some(res) = re.captures(&cmd.common_args.url) {
                     let item_type = &res[1];
                     let id = &res[2];
                     let Ok(mut item_ref) = SpotifyId::from_base62(id) else {
@@ -192,20 +232,18 @@ async fn main() -> anyhow::Result<()> {
                     item_ref.item_type = parse_item_type(item_type);
                     item_ref
                 } else {
-                    let Ok(mut item_ref) = SpotifyId::from_base62(&args.url) else {
-                        bail!("Invalid Spotify ID: {}", &args.url);
+                    let Ok(mut item_ref) = SpotifyId::from_base62(&cmd.common_args.url) else {
+                        bail!("Invalid Spotify ID: {}", &cmd.common_args.url);
                     };
                     item_ref.item_type = SpotifyItemType::Track;
                     item_ref
                 }
             };
-            loader.download(item_ref, args).await;
+            loader.download(item_ref, cmd).await;
         }
     };
 
     tokio::fs::remove_file("temp.pcm").await?;
-
-    println!("All set!");
 
     Ok(())
 }

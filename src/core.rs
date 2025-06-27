@@ -1,5 +1,8 @@
-use crate::metadata::{
-    REGEX_FILTER, get_input_format, try_get_format_from_file_name, try_get_format_from_path,
+use crate::{
+    DownloadArgs,
+    metadata::{
+        REGEX_FILTER, get_input_format, try_get_format_from_file_name, try_get_format_from_path,
+    },
 };
 use anyhow::{anyhow, bail};
 use itertools::Itertools;
@@ -32,7 +35,7 @@ use tokio::{
     process::{Child, Command},
 };
 
-use crate::{Args, metadata::get_file_name};
+use crate::metadata::get_file_name;
 
 #[derive(clap::ValueEnum, Clone, Copy, Default, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -321,11 +324,18 @@ impl Loader {
         Ok(())
     }
 
-    async fn download_playlist(&self, playlist_ref: SpotifyId, args: Args) -> anyhow::Result<()> {
+    async fn download_playlist(
+        &self,
+        playlist_ref: SpotifyId,
+        cmd: DownloadArgs,
+    ) -> anyhow::Result<()> {
         let plist = Playlist::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading playlist {}", plist.name());
 
-        let folder = args.output_path.unwrap_or(PathBuf::from(plist.name()));
+        let folder = cmd
+            .common_args
+            .output_path
+            .unwrap_or(PathBuf::from(plist.name()));
 
         create_dir_all(&folder)
             .await
@@ -334,15 +344,19 @@ impl Loader {
         self.download_tracks(
             plist.tracks(),
             &folder,
-            args.format,
-            &args.name_format,
-            args.force_download,
-            args.max_tries,
+            cmd.format,
+            &cmd.name_format,
+            cmd.force_download,
+            cmd.max_tries,
         )
         .await
     }
 
-    async fn download_album(&self, playlist_ref: SpotifyId, args: Args) -> anyhow::Result<()> {
+    async fn download_album(
+        &self,
+        playlist_ref: SpotifyId,
+        cmd: DownloadArgs,
+    ) -> anyhow::Result<()> {
         let album = Album::get(&self.session, &playlist_ref).await.unwrap();
 
         let artists = album
@@ -352,7 +366,8 @@ impl Loader {
             .collect::<Vec<&str>>()
             .join(", ");
 
-        let folder = args
+        let folder = cmd
+            .common_args
             .output_path
             .unwrap_or(PathBuf::from(format!("{} - {}", artists, album.name)));
 
@@ -365,19 +380,26 @@ impl Loader {
         self.download_tracks(
             album.tracks(),
             &folder,
-            args.format,
-            &args.name_format,
-            args.force_download,
-            args.max_tries,
+            cmd.format,
+            &cmd.name_format,
+            cmd.force_download,
+            cmd.max_tries,
         )
         .await
     }
 
-    async fn download_show(&self, playlist_ref: SpotifyId, args: Args) -> anyhow::Result<()> {
+    async fn download_show(
+        &self,
+        playlist_ref: SpotifyId,
+        cmd: DownloadArgs,
+    ) -> anyhow::Result<()> {
         let show = Show::get(&self.session, &playlist_ref).await.unwrap();
         println!("Downloading show {} by {}", show.name, show.publisher);
 
-        let folder = args.output_path.unwrap_or(PathBuf::from(&show.name));
+        let folder = cmd
+            .common_args
+            .output_path
+            .unwrap_or(PathBuf::from(&show.name));
 
         create_dir_all(&folder)
             .await
@@ -386,10 +408,10 @@ impl Loader {
         self.download_tracks(
             show.episodes.iter(),
             &folder,
-            args.format,
-            &args.name_format,
-            args.force_download,
-            args.max_tries,
+            cmd.format,
+            &cmd.name_format,
+            cmd.force_download,
+            cmd.max_tries,
         )
         .await
     }
@@ -449,8 +471,8 @@ impl Loader {
         }
     }
 
-    pub async fn download(&self, item_ref: SpotifyId, args: Args) {
-        if let Some(filter) = &args.cleanup_regex {
+    pub(crate) async fn download(&self, item_ref: SpotifyId, cmd: DownloadArgs) {
+        if let Some(filter) = &cmd.cleanup_regex {
             match Regex::new(filter) {
                 Ok(re) => {
                     _ = REGEX_FILTER.try_insert(re).unwrap();
@@ -461,34 +483,34 @@ impl Loader {
             };
         }
 
-        let path = args.output_path.as_ref().map(|a| a.as_path());
+        let path = cmd.common_args.output_path.as_ref().map(|a| a.as_path());
 
         if let Err(e) = match item_ref.item_type {
             SpotifyItemType::Track => {
                 self.download_single_track(
                     item_ref,
                     path,
-                    args.format,
-                    &args.name_format,
-                    args.force_download,
-                    args.max_tries,
+                    cmd.format,
+                    &cmd.name_format,
+                    cmd.force_download,
+                    cmd.max_tries,
                 )
                 .await
             }
-            SpotifyItemType::Album => self.download_album(item_ref, args).await,
-            SpotifyItemType::Playlist => self.download_playlist(item_ref, args).await,
+            SpotifyItemType::Album => self.download_album(item_ref, cmd).await,
+            SpotifyItemType::Playlist => self.download_playlist(item_ref, cmd).await,
             SpotifyItemType::Episode => {
                 self.download_single_track(
                     item_ref,
                     path,
-                    args.format,
-                    &args.name_format,
-                    args.force_download,
-                    args.max_tries,
+                    cmd.format,
+                    &cmd.name_format,
+                    cmd.force_download,
+                    cmd.max_tries,
                 )
                 .await
             }
-            SpotifyItemType::Show => self.download_show(item_ref, args).await,
+            SpotifyItemType::Show => self.download_show(item_ref, cmd).await,
             _ => Err(anyhow!("Unsupported item type: {:?}", item_ref.item_type)),
         } {
             log::error!("Failed to download: {}", e);
